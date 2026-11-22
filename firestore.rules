@@ -35,5 +35,6 @@ service cloud.firestore {
     match /epis/{id}         { allow read: if ativo(); allow write: if tem(['admin', 'gerente', 'almox', 'tst']); }
     match /entregas/{id}     { allow read: if ativo(); allow write: if tem(['admin', 'gerente', 'almox', 'tst']); }
     match /autorizacoes/{id} { allow read: if ativo(); allow write: if tem(['admin', 'gerente', 'almox', 'tst']); }
+    match /notas/{id}        { allow read: if ativo(); allow write: if tem(['admin', 'gerente', 'almox', 'tst']); }
   }
 }

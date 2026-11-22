@@ -175,6 +175,7 @@ table.tb{width:100%;border-collapse:collapse;font-size:13px}
 </div></header>
 
 <main>
+<input type="file" id="xml-file" accept=".xml,text/xml,application/xml" multiple hidden>
 <div class="ro-banner hidden" id="ro">Seu acesso a esta página é somente leitura. Peça ao dono acesso de Colaborador para registrar.</div>
 <div class="demo hidden" id="demo-banner"></div>
 <div class="ro-banner hidden" id="papel-banner"></div>
@@ -280,14 +281,15 @@ table.tb{width:100%;border-collapse:collapse;font-size:13px}
     <button data-sub="ferramentas" class="on">Ferramentas</button><button data-sub="epis">EPIs</button><button data-sub="funcionarios">Funcionários</button><button data-sub="kits">Kits</button><button data-sub="regras">Regras</button><button data-sub="trein">Treinamentos</button><button data-sub="empresa">Empresa</button><button data-sub="usuarios">Usuários</button>
   </div>
   <div id="sub-ferramentas" class="sub">
-    <div class="head"><h2>Ferramentas</h2><button class="btn ghost" id="f-qr" type="button">Etiquetas QR</button><button class="btn ghost" id="f-imp" type="button">Importar lista</button><button class="btn primary" id="f-new" type="button">+ Nova</button></div>
+    <div class="head"><h2>Ferramentas</h2><button class="btn ghost" id="f-qr" type="button">Etiquetas QR</button><button class="btn ghost" id="f-imp" type="button">Importar lista</button><button class="btn ghost" data-xml type="button">Importar XML (NF-e)</button><button class="btn primary" id="f-new" type="button">+ Nova</button></div>
     <input id="f-q" placeholder="Buscar código, descrição, categoria, nº de série" autocomplete="off">
     <div class="chips" id="f-chips"></div>
     <div id="f-list" class="list"></div>
   </div>
   <div id="sub-epis" class="sub" hidden>
-    <div class="head"><h2>EPIs</h2><button class="btn ghost" id="p-qr" type="button">Etiquetas QR</button><button class="btn ghost" id="p-imp" type="button">Importar lista</button><button class="btn primary" id="p-new" type="button">+ Novo</button></div>
+    <div class="head"><h2>EPIs</h2><button class="btn ghost" id="p-qr" type="button">Etiquetas QR</button><button class="btn ghost" id="p-imp" type="button">Importar lista</button><button class="btn ghost" data-xml type="button">Importar XML (NF-e)</button><button class="btn primary" id="p-new" type="button">+ Novo</button></div>
     <input id="p-q" placeholder="Buscar nome, CA, categoria" autocomplete="off">
+    <p class="note" id="p-canota" style="margin:8px 0 0"></p>
     <div id="p-list" class="list" style="margin-top:12px"></div>
   </div>
   <div id="sub-funcionarios" class="sub" hidden>
@@ -393,10 +395,10 @@ function calibBadge(f) {
   if (c === 'sem') return `<span class="badge b-warn">Sem data de calibração</span>`;
   return '';
 }
-function caState(p) { const v = str(p.validadeCA); if (!v) return 'sem'; if (v < todayStr()) return 'vencido'; if (v <= addDays(60)) return 'vence'; return 'ok'; }
+function caState(p) { if (p.caSituacao && !/^V[ÁA]LIDO/i.test(str(p.caSituacao))) return 'vencido'; const v = str(p.validadeCA); if (!v) return 'sem'; if (v < todayStr()) return 'vencido'; if (v <= addDays(60)) return 'vence'; return 'ok'; }
 function caBadge(p) {
   const c = caState(p);
-  if (c === 'vencido') return `<span class="badge b-bad">CA vencido</span>`;
+  if (c === 'vencido') return `<span class="badge b-bad">CA ${p.caSituacao && !/^V[ÁA]LIDO/i.test(str(p.caSituacao)) ? esc(str(p.caSituacao).toLowerCase()) : 'vencido'}</span>`;
   if (c === 'vence') return `<span class="badge b-warn">CA vence ${fmtD(p.validadeCA)}</span>`;
   if (c === 'sem') return `<span class="badge b-warn">Sem validade do CA</span>`;
   return '';
@@ -1034,7 +1036,7 @@ function openFerr(id) {
   openModal(mtop(f ? 'Ferramenta' : 'Nova ferramenta') + `<div class="card">
     <div class="grid2"><div><label for="ff-cod">Código / TAG / patrimônio *</label><input id="ff-cod" value="${v('codigo')}"></div>
     <div><label for="ff-cat">Categoria</label><input id="ff-cat" list="cats" value="${v('categoria')}" placeholder="Ex.: Instrumento, Manual, Elétrica"></div></div>
-    <label for="ff-desc">Descrição (tipo) *</label><input id="ff-desc" list="descs" value="${v('descricao')}" placeholder="Ex.: Megôhmetro digital 5 kV">
+    <label for="ff-desc">Descrição (tipo) *</label><input id="ff-desc" list="descs" value="${v('descricao')}" placeholder="Ex.: Megôhmetro digital 5 kV"><div id="ff-stk"></div>
     <div class="grid2"><div><label for="ff-mm">Marca / modelo</label><input id="ff-mm" value="${v('marcaModelo')}"></div><div><label for="ff-sn">Nº de série</label><input id="ff-sn" value="${v('numSerie')}"></div></div>
     <div class="grid3"><div><label for="ff-val">Valor de compra (R$)</label><input id="ff-val" inputmode="decimal" value="${f && num(f.valor) ? String(num(f.valor)).replace('.', ',') : ''}"></div>
     <div><label for="ff-dc">Data de compra</label><input type="date" id="ff-dc" value="${v('dataCompra')}"></div><div><label for="ff-nf">NF de entrada</label><input id="ff-nf" value="${v('nf')}"></div></div>
@@ -1051,6 +1053,8 @@ function openFerr(id) {
     <datalist id="descs">${[...new Set(S.ferr.map(x => x.descricao).filter(Boolean))].map(c => `<option value="${esc(c)}">`).join('')}</datalist></div>
     <div class="actions">${f && !lent ? `<button class="btn danger" id="ff-del">Excluir</button>` : ''}${f ? `<button class="btn ghost" id="ff-etq">Etiqueta QR</button>` : ''}<button class="btn ghost" data-close>Cancelar</button><button class="btn primary" id="ff-save" ${S.canWrite === false ? 'disabled' : ''}>Salvar</button></div>
     ${f ? `<h3>Histórico de uso</h3><div class="list">${cautList(histFor('ferramentaIds', f.id))}</div>` : ''}`);
+  const fstk = () => { $('#ff-stk').innerHTML = estoqueFerrHtml($('#ff-desc').value, f && f.id); };
+  $('#ff-desc').addEventListener('input', fstk); $('#ff-desc').addEventListener('change', fstk); fstk();
   $('#ff-cal').onchange = e => $('#ff-calbox').classList.toggle('hidden', !e.target.checked);
   const sts = $('#ff-st'); if (sts) sts.onchange = () => $('#ff-bxbox').classList.toggle('hidden', sts.value !== 'baixada');
   $('#ff-save').onclick = () => saveFerr(f);
@@ -1076,11 +1080,65 @@ async function saveFerr(f) {
 }
 
 /* EPIs */
+/* ================= base oficial de CAs (MTE / CAEPI), atualizada todo dia pelo GitHub ================= */
+const CAEPI = { base: null, carregando: null, nomes: {} };
+function caLoad() {
+  if (CAEPI.base) return Promise.resolve(CAEPI.base);
+  if (!CAEPI.carregando) CAEPI.carregando = fetch('ca.json', { cache: 'no-cache' }).then(r => r.ok ? r.json() : null).then(j => (CAEPI.base = j && j.ca ? j : null)).catch(() => null);
+  return CAEPI.carregando;
+}
+const caKey = ca => String(ca || '').replace(/\D/g, '').replace(/^0+/, '');
+async function caInfo(ca) {
+  const k = caKey(ca); if (!k) return null; const b = await caLoad(); if (!b) return null;
+  const r = b.ca[k]; if (!r) return { k, achou: false };
+  let nome = null; const sh = String(Number(k) % 100).padStart(2, '0');
+  try { if (!CAEPI.nomes[sh]) CAEPI.nomes[sh] = await fetch('ca/' + sh + '.json', { cache: 'no-cache' }).then(x => x.ok ? x.json() : {}); nome = CAEPI.nomes[sh][k] || null; } catch (_) {}
+  return { k, achou: true, validade: r[0] || '', situacao: r[1] || '', equipamento: nome ? nome[0] : '', fabricante: nome ? nome[1] : '' };
+}
+function caBaseNota() {
+  const b = CAEPI.base; if (!b) return 'Base oficial de CAs ainda não disponível: a validade do CA fica manual por enquanto.';
+  const velha = str(b.dataArquivo) && str(b.dataArquivo) < addDays(-45);
+  return `Validade dos CAs conferida automaticamente com a base do MTE (CAEPI)${b.dataArquivo ? ', arquivo de ' + fmtD(b.dataArquivo) : ''}.${velha ? ' Atenção: o governo não atualiza esse arquivo há mais de 45 dias; confira CAs críticos no site do CAEPI.' : ''}`;
+}
+let caSyncFeito = false;
+async function caSync() {
+  if (caSyncFeito || !S.ready.epis || !db || S.canWrite === false || !['admin', 'gerente', 'almox', 'tst'].includes(papelAtual())) return;
+  caSyncFeito = true; const b = await caLoad(); renderEpis(); if (!b) return;
+  let n = 0;
+  for (const p of S.epis) {
+    const r = b.ca[caKey(p.ca)]; if (!r) continue;
+    const d = {}; if (r[0] && r[0] !== str(p.validadeCA)) d.validadeCA = r[0]; if (r[1] && r[1] !== str(p.caSituacao)) d.caSituacao = r[1];
+    if (Object.keys(d).length) { d.caConferidoEm = todayStr(); try { await db.doc('epis/' + p.id).update(d); n++; await sleep(40); } catch (_) {} }
+  }
+  if (n) toast(`${n} CA(s) atualizado(s) com a base oficial do MTE.`, 'ok');
+}
+/* resumo do que já existe em estoque, para mostrar durante o cadastro */
+function estoqueFerrHtml(desc, ignorarId) {
+  const q = norm(desc).trim(); if (q.length < 3) return '';
+  const mesmo = S.ferr.filter(x => x.id !== ignorarId && norm(x.descricao) === q);
+  const pare = mesmo.length ? mesmo : S.ferr.filter(x => x.id !== ignorarId && norm(x.descricao).includes(q)).slice(0, 40);
+  if (!pare.length) return '<div class="note">Nenhuma ferramenta parecida cadastrada. Será a primeira.</div>';
+  const c = k => pare.filter(x => x.status === k).length;
+  const tipos = [...new Set(pare.map(x => x.descricao))];
+  return `<div class="sel" style="margin-top:8px"><div class="main"><b>Em estoque: ${pare.length - c('baixada')} unidade(s)</b>${mesmo.length ? '' : ` parecidas (${esc(tipos.slice(0, 3).join(', '))}${tipos.length > 3 ? '…' : ''})`}
+    <div class="t2">${c('disponivel')} disponíveis · ${c('emprestada')} emprestadas · ${c('manutencao')} em manutenção${c('extraviada') ? ' · ' + c('extraviada') + ' extraviadas' : ''}${c('baixada') ? ' · ' + c('baixada') + ' baixadas' : ''}</div>
+    <div class="t2">Códigos: ${pare.slice(0, 8).map(x => esc(x.codigo)).join(', ')}${pare.length > 8 ? '…' : ''}</div></div></div>`;
+}
+function estoqueEpiHtml(nome, ca, ignorarId) {
+  const k = caKey(ca), q = norm(nome).trim();
+  const porCA = k ? S.epis.filter(x => x.id !== ignorarId && caKey(x.ca) === k) : [];
+  const porNome = q.length >= 3 ? S.epis.filter(x => x.id !== ignorarId && !porCA.includes(x) && norm(x.nome).includes(q)).slice(0, 4) : [];
+  if (!porCA.length && !porNome.length) return (k || q.length >= 3) ? '<div class="note">Nenhum EPI igual cadastrado. Será um item novo.</div>' : '';
+  return [...porCA.map(x => `<div class="sel" style="margin-top:8px;border-color:#e5a400"><div class="main"><b>Este CA já está cadastrado:</b> ${esc(x.nome)}<div class="t2">Estoque atual: <b>${num(x.estoque)}</b>${num(x.estoqueMin) ? ' · mínimo ' + num(x.estoqueMin) : ''} · ${brl(x.custo)}</div></div><button class="btn sm ghost" data-abrirepi="${esc(x.id)}" type="button">Abrir</button></div>`),
+    ...porNome.map(x => `<div class="sel" style="margin-top:6px"><div class="main">${esc(x.nome)} <span class="note">CA ${esc(x.ca)}</span><div class="t2">Estoque: <b>${num(x.estoque)}</b></div></div><button class="btn sm ghost" data-abrirepi="${esc(x.id)}" type="button">Abrir</button></div>`)].join('');
+}
 function renderEpis() {
   if (!S.ready.epis) { $('#p-list').innerHTML = loading(); return; }
   const q = norm($('#p-q').value);
   const L = S.epis.filter(p => !q || norm([p.nome, p.ca, p.categoria].join(' ')).includes(q)).sort((a, b) => str(a.nome).localeCompare(str(b.nome), 'pt'));
   $('#p-list').innerHTML = L.length ? L.map(epiRow).join('') : `<div class="empty">${S.epis.length ? 'Nada encontrado.' : 'Nenhum EPI cadastrado.'}</div>`;
+  const nt = $('#p-canota'); if (nt) nt.textContent = caBaseNota();
+  caSync();
 }
 $('#p-q').addEventListener('input', renderEpis);
 $('#p-new').onclick = () => openEpi(null);
@@ -1096,13 +1154,28 @@ function openEpi(id) {
     <div class="grid2"><div><label for="pe-vida">Troca a cada (dias)</label><input id="pe-vida" type="number" min="0" value="${p ? num(p.vidaUtilDias) || '' : ''}"></div><div><label for="pe-custo">Custo unitário (R$)</label><input id="pe-custo" inputmode="decimal" value="${p && num(p.custo) ? String(num(p.custo)).replace('.', ',') : ''}"></div></div>
     <div class="grid2"><div><label for="pe-est">Estoque atual</label><input id="pe-est" type="number" min="0" value="${p ? num(p.estoque) : ''}"></div><div><label for="pe-min">Estoque mínimo</label><input id="pe-min" type="number" min="0" value="${p ? num(p.estoqueMin) || '' : ''}"></div></div>
     <datalist id="ecats">${[...new Set(S.epis.map(x => x.categoria).filter(Boolean))].map(c => `<option value="${esc(c)}">`).join('')}</datalist>
-    ${p ? `<p class="note">${ents.length} entregas registradas · ${brl(gasto)} no total.</p>` : ''}</div>
+    <div id="pe-caepi" class="note"></div><div id="pe-stk"></div>
+    ${p ? `<p class="note">${ents.length} entregas registradas · ${brl(gasto)} no total.${p.caConferidoEm ? ' CA conferido no CAEPI em ' + fmtD(p.caConferidoEm) + (p.caSituacao ? ' (' + esc(p.caSituacao) + ')' : '') + '.' : ''}</p>` : ''}</div>
     <div class="actions">${p ? `<button class="btn danger" id="pe-del">Excluir</button>` : ''}${p ? `<button class="btn ghost" id="pe-etq">Etiqueta QR</button>` : ''}<button class="btn ghost" data-close>Cancelar</button><button class="btn primary" id="pe-save" ${S.canWrite === false ? 'disabled' : ''}>Salvar</button></div>`);
+  let caT = null, caSit = p ? str(p.caSituacao) : '', autoNome = '';
+  const stk = () => { $('#pe-stk').innerHTML = estoqueEpiHtml($('#pe-nome').value, $('#pe-ca').value, p && p.id); };
+  const consultaCA = async () => { const el = $('#pe-caepi'); if (!el) return; const i = await caInfo($('#pe-ca').value); if (!$('#pe-caepi')) return;
+    if (!i) { el.textContent = ''; return; }
+    if (!i.achou) { el.innerHTML = '<span style="color:#b3261e">CA não encontrado na base do MTE. Confira o número.</span>'; caSit = ''; return; }
+    caSit = i.situacao;
+    if (i.validade && $('#pe-cav').value !== i.validade) $('#pe-cav').value = i.validade;
+    if ((!$('#pe-nome').value.trim() || $('#pe-nome').value === autoNome) && i.equipamento) { $('#pe-nome').value = autoNome = i.equipamento; stk(); }
+    el.innerHTML = `CAEPI: <b>${esc(i.equipamento || 'equipamento')}</b>${i.fabricante ? ' · ' + esc(i.fabricante) : ''} · ${/^V[ÁA]LIDO/i.test(i.situacao) ? '<span style="color:#1e7d3a">' : '<span style="color:#b3261e">'}${esc(i.situacao || '')}</span>${i.validade ? ' até ' + fmtD(i.validade) : ''}. Validade preenchida automaticamente.`; };
+  $('#pe-ca').addEventListener('input', () => { stk(); clearTimeout(caT); caT = setTimeout(consultaCA, 400); });
+  $('#pe-nome').addEventListener('input', stk);
+  $('#pe-stk').addEventListener('click', ev => { const b = ev.target.closest('[data-abrirepi]'); if (b) openEpi(b.dataset.abrirepi); });
+  stk(); if ($('#pe-ca').value) consultaCA();
   $('#pe-save').onclick = async () => {
     if (!guardWrite()) return;
     const nome = $('#pe-nome').value.trim(), ca = $('#pe-ca').value.trim();
     if (!nome || !ca) return toast('Preencha nome e CA.', 'bad');
-    const data = { nome, ca, validadeCA: $('#pe-cav').value, categoria: $('#pe-cat').value.trim(), vidaUtilDias: num($('#pe-vida').value), custo: num($('#pe-custo').value), estoque: num($('#pe-est').value), estoqueMin: num($('#pe-min').value) };
+    if (!p && S.epis.some(x => caKey(x.ca) === caKey(ca))) return toast('Este CA já está cadastrado. Abra o item existente e ajuste o estoque.', 'bad');
+    const data = { nome, ca, caSituacao: caSit, validadeCA: $('#pe-cav').value, categoria: $('#pe-cat').value.trim(), vidaUtilDias: num($('#pe-vida').value), custo: num($('#pe-custo').value), estoque: num($('#pe-est').value), estoqueMin: num($('#pe-min').value) };
     try { if (p) await db.doc('epis/' + p.id).update(data); else await db.collection('epis').doc().set(Object.assign({ criadoEm: new Date().toISOString() }, data)); closeModal(); toast('EPI salvo.', 'ok'); } catch (e) { handleErr(e); }
   };
   const del = $('#pe-del'); if (del) armDelete(del, () => db.doc('epis/' + p.id).delete());
@@ -1256,6 +1329,105 @@ $('#c-seg').addEventListener('click', e => { if (e.target.closest('[data-sub=reg
 
 /* ================= importação em lote ================= */
 function splitLines(txt) { return txt.split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(l => (l.includes('\t') ? l.split('\t') : l.split(';')).map(c => c.trim().replace(/^"|"$/g, ''))); }
+/* ================= importação de NF-e (XML) ================= */
+const EPI_PAL = /\b(luva|bota|botina|sapato de seguran|calçado de seguran|óculos|oculos|capacete|protetor|abafador|plug|máscara|mascara|respirador|filtro|vestimenta|uniforme|camisa|calça|jaleco|creme protetor|cinto|talabarte|trava.?queda|avental|mangote|perneira|balaclava|capuz|touca|viseira|protetor facial|colete|macacão|macacao|capa de chuva|bota de pvc|epi)\b/i;
+const caDoTexto = t => { const m = str(t).match(/\bC\.?\s?A\.?\s*(?:n[º°o.]*|:|-|nº)?\s*(\d{3,6})\b/i); return m ? m[1] : ''; };
+const tx = (el, tag) => { const x = el && el.getElementsByTagName(tag)[0]; return x ? x.textContent.trim() : ''; };
+const nx = t => { const v = parseFloat(String(t || '').replace(',', '.')); return isFinite(v) ? v : 0; }; /* números do XML usam ponto decimal */
+function lerNFe(texto) {
+  const d = new DOMParser().parseFromString(texto, 'application/xml');
+  if (d.getElementsByTagName('parsererror').length) throw new Error('Arquivo XML inválido.');
+  const inf = d.getElementsByTagName('infNFe')[0]; if (!inf) throw new Error('Este XML não é uma NF-e.');
+  const ide = inf.getElementsByTagName('ide')[0], emit = inf.getElementsByTagName('emit')[0];
+  const chave = (tx(d, 'chNFe') || str(inf.getAttribute('Id')).replace(/^NFe/, '')).replace(/\D/g, '');
+  const itens = [...inf.getElementsByTagName('det')].map(det => { const pr = det.getElementsByTagName('prod')[0];
+    return { n: det.getAttribute('nItem'), cProd: tx(pr, 'cProd'), xProd: tx(pr, 'xProd'), ncm: tx(pr, 'NCM'), uCom: tx(pr, 'uCom'), qCom: nx(tx(pr, 'qCom')), vUnCom: nx(tx(pr, 'vUnCom')), vProd: nx(tx(pr, 'vProd')), info: tx(det, 'infAdProd') }; });
+  return { chave, numero: tx(ide, 'nNF'), serie: tx(ide, 'serie'), data: (tx(ide, 'dhEmi') || tx(ide, 'dEmi')).slice(0, 10), emitente: tx(emit, 'xFant') || tx(emit, 'xNome'), cnpj: tx(emit, 'CNPJ') || tx(emit, 'CPF'), total: nx(tx(inf.getElementsByTagName('ICMSTot')[0], 'vNF')), itens };
+}
+function melhorEpi(it) {
+  const ca = caDoTexto(it.xProd + ' ' + it.info);
+  if (ca) { const p = S.epis.find(x => caKey(x.ca) === caKey(ca)); if (p) return { id: p.id, ca }; }
+  const q = norm(it.xProd); const p2 = S.epis.find(x => norm(x.nome) && (q.includes(norm(x.nome)) || norm(x.nome).includes(q)));
+  return { id: p2 ? p2.id : '', ca };
+}
+function codigoBase(it, nf) { const b = (str(it.cProd).replace(/[^A-Za-z0-9-]/g, '').slice(0, 12) || ('NF' + nf.numero + '-' + it.n)).toUpperCase(); return b; }
+function codigosLivres(base, n) { const usados = new Set(S.ferr.map(x => norm(x.codigo))); const out = []; if (n === 1 && !usados.has(norm(base))) return [base]; let k = 1; while (out.length < n && k < 9999) { const c = base + '-' + String(k).padStart(2, '0'); if (!usados.has(norm(c))) out.push(c); k++; } return out; }
+let NF = null;
+document.addEventListener('click', e => { if (e.target.closest('[data-xml]')) { if (!guardWrite()) return; const f = $('#xml-file'); f.value = ''; f.click(); } });
+$('#xml-file').addEventListener('change', async e => {
+  const files = [...e.target.files]; if (!files.length) return;
+  const notas = [];
+  for (const f of files) { try { notas.push(lerNFe(await f.text())); } catch (er) { toast(f.name + ': ' + er.message, 'bad'); } }
+  if (notas.length) abrirNFe(notas, 0);
+});
+async function abrirNFe(notas, idx) {
+  const nf = notas[idx]; if (!nf) return;
+  let ja = null; if (nf.chave) { try { const d = await db.doc('notas/' + nf.chave).get(); if (d.exists) ja = d.data(); } catch (_) {} }
+  NF = { nf, notas, idx, itens: nf.itens.map(it => { const m = melhorEpi(it); const ehEpi = !!m.id || !!m.ca || EPI_PAL.test(it.xProd);
+    const qtd = Math.max(1, Math.round(it.qCom)); return Object.assign({}, it, { dest: ehEpi ? 'epi' : 'ferr', epiId: m.id, ca: m.ca, nome: it.xProd, qtd, base: codigoBase(it, nf), cat: '' }); }) };
+  const row = (it, i) => `<div class="card" style="padding:10px 12px;margin:8px 0" data-nfi="${i}">
+    <div style="display:flex;gap:8px;align-items:flex-start"><div style="margin-right:auto"><b>${esc(it.xProd)}</b><div class="note">Item ${esc(it.n)} · ${String(it.qCom).replace('.', ',')} ${esc(it.uCom)} × ${brl(it.vUnCom)} = ${brl(it.vProd)}${it.cProd ? ' · cód. ' + esc(it.cProd) : ''}</div></div>
+    <select data-nfd="${i}" style="width:auto"><option value="epi" ${it.dest === 'epi' ? 'selected' : ''}>EPI</option><option value="ferr" ${it.dest === 'ferr' ? 'selected' : ''}>Ferramenta</option><option value="ign">Ignorar</option></select></div>
+    <div class="nfbody"></div></div>`;
+  openModal(mtop('Importar NF-e') + `<div class="card"><b>NF ${esc(nf.numero)}${nf.serie ? '-' + esc(nf.serie) : ''}</b> · ${fmtD(nf.data)} · ${brl(nf.total)}<div class="note">${esc(nf.emitente)}${nf.cnpj ? ' · CNPJ ' + esc(nf.cnpj) : ''}${notas.length > 1 ? ` · nota ${idx + 1} de ${notas.length}` : ''}</div>
+    ${ja ? `<p style="color:#b3261e;margin:8px 0 0"><b>Esta nota já foi importada em ${fmtD(ja.importadoEm)}.</b> Importar de novo duplicaria o estoque.</p>` : ''}
+    <p class="note">Confira cada item: EPI soma no estoque (novo ou existente); ferramenta cria uma unidade por quantidade, cada uma com seu código.</p></div>
+    <div id="nf-itens">${NF.itens.map(row).join('')}</div>
+    <div class="actions"><button class="btn ghost" data-close>Cancelar</button>${notas.length > idx + 1 ? '<button class="btn ghost" id="nf-skip">Pular esta nota</button>' : ''}<button class="btn primary" id="nf-go" ${ja ? 'disabled' : ''}>Lançar no estoque</button></div>`);
+  const epiOpts = sel => `<option value="">+ Cadastrar novo EPI</option>` + S.epis.slice().sort((a, b) => str(a.nome).localeCompare(str(b.nome), 'pt')).map(p => `<option value="${esc(p.id)}" ${sel === p.id ? 'selected' : ''}>${esc(p.nome)} · CA ${esc(p.ca)} · estoque ${num(p.estoque)}</option>`).join('');
+  const body = i => { const it = NF.itens[i]; const el = $(`#nf-itens [data-nfi="${i}"] .nfbody`); if (!el) return;
+    if (it.dest === 'ign') { el.innerHTML = '<div class="note">Não será lançado.</div>'; return; }
+    if (it.dest === 'epi') { const p = S.epis.find(x => x.id === it.epiId);
+      el.innerHTML = `<label>Vincular ao EPI</label><select data-nfe="${i}">${epiOpts(it.epiId)}</select>
+        ${p ? '' : `<div class="grid2"><div><label>Nome do EPI</label><input data-nfn="${i}" value="${esc(it.nome)}"></div><div><label>Nº do CA *</label><input data-nfc="${i}" inputmode="numeric" value="${esc(it.ca)}"></div></div><div class="note" data-nfca="${i}"></div>`}
+        <div class="grid2"><div><label>Quantidade de entrada</label><input type="number" min="0" data-nfq="${i}" value="${it.qtd}"></div><div style="display:flex;align-items:flex-end"><div class="note">${p ? `Estoque: ${num(p.estoque)} → <b>${num(p.estoque) + it.qtd}</b>` : 'Item novo: estoque inicial = quantidade'}</div></div></div>
+        ${/^(cx|caixa|pct|pc|kit|par|pr|dz)/i.test(it.uCom) ? `<p class="note">Unidade na nota: ${esc(it.uCom)}. Ajuste a quantidade se a caixa/pacote tiver várias unidades.</p>` : ''}`;
+      if (!p && it.ca) caInfoNF(i);
+    } else {
+      const cods = codigosLivres(it.base, it.qtd);
+      el.innerHTML = `<div class="grid3"><div><label>Quantidade</label><input type="number" min="0" data-nfq="${i}" value="${it.qtd}"></div><div><label>Código base</label><input data-nfb="${i}" value="${esc(it.base)}"></div><div><label>Categoria</label><input data-nfk="${i}" list="cats-nf" value="${esc(it.cat)}"></div></div>
+        <div class="note">Códigos que serão criados: ${esc(cods.slice(0, 6).join(', '))}${cods.length > 6 ? '… (' + cods.length + ')' : ''}</div>${estoqueFerrHtml(it.xProd)}`;
+    } };
+  const caInfoNF = async i => { const it = NF.itens[i]; const el = $(`#nf-itens [data-nfca="${i}"]`); const info = await caInfo(it.ca); if (!el) return; it.caVal = info && info.achou ? info.validade : ''; it.caSit = info && info.achou ? info.situacao : '';
+    el.innerHTML = !info ? '' : !info.achou ? '<span style="color:#b3261e">CA não encontrado na base do MTE.</span>' : `CAEPI: ${esc(info.equipamento)} · ${esc(info.situacao)}${info.validade ? ' até ' + fmtD(info.validade) : ''}`; };
+  NF.itens.forEach((_, i) => body(i));
+  const box = $('#nf-itens');
+  box.insertAdjacentHTML('beforeend', `<datalist id="cats-nf">${[...new Set(S.ferr.map(x => x.categoria).filter(Boolean))].map(c => `<option value="${esc(c)}">`).join('')}</datalist>`);
+  box.addEventListener('change', ev => { const t = ev.target; if (t.dataset.nfd != null) { NF.itens[+t.dataset.nfd].dest = t.value; body(+t.dataset.nfd); } if (t.dataset.nfe != null) { NF.itens[+t.dataset.nfe].epiId = t.value; body(+t.dataset.nfe); } });
+  let tmo = null;
+  box.addEventListener('input', ev => { const t = ev.target; const ds = t.dataset;
+    if (ds.nfq != null) { const it = NF.itens[+ds.nfq]; it.qtd = Math.max(0, Math.round(num(t.value))); clearTimeout(tmo); tmo = setTimeout(() => { body(+ds.nfq); const el = $(`#nf-itens [data-nfq="${ds.nfq}"]`); if (el) { el.focus(); const v = el.value; el.value = ''; el.value = v; } }, 700); }
+    if (ds.nfb != null) NF.itens[+ds.nfb].base = t.value.trim().toUpperCase();
+    if (ds.nfk != null) NF.itens[+ds.nfk].cat = t.value.trim();
+    if (ds.nfn != null) NF.itens[+ds.nfn].nome = t.value;
+    if (ds.nfc != null) { NF.itens[+ds.nfc].ca = t.value.trim(); clearTimeout(tmo); tmo = setTimeout(() => caInfoNF(+ds.nfc), 400); } });
+  const sk = $('#nf-skip'); if (sk) sk.onclick = () => abrirNFe(notas, idx + 1);
+  $('#nf-go').onclick = async () => {
+    if (!guardWrite()) return;
+    const L = NF.itens.filter(it => it.dest !== 'ign' && it.qtd > 0);
+    if (!L.length) return toast('Nenhum item para lançar.', 'bad');
+    const semCA = L.find(it => it.dest === 'epi' && !it.epiId && !caKey(it.ca)); if (semCA) return toast('Informe o CA de: ' + semCA.xProd, 'bad');
+    const btn = $('#nf-go'); btn.disabled = true; btn.textContent = 'Lançando…';
+    const reg = []; const agora = new Date().toISOString();
+    try {
+      for (const it of L) {
+        if (it.dest === 'epi') {
+          let p = it.epiId ? S.epis.find(x => x.id === it.epiId) : S.epis.find(x => caKey(x.ca) === caKey(it.ca));
+          if (p) { await db.doc('epis/' + p.id).update({ estoque: num(p.estoque) + it.qtd, custo: it.vUnCom || num(p.custo), ultimaNF: nf.numero, ultimaEntrada: nf.data }); p.estoque = num(p.estoque) + it.qtd; reg.push({ item: it.xProd, destino: 'epi', id: p.id, qtd: it.qtd }); }
+          else { const ref = db.collection('epis').doc(); await ref.set({ nome: str(it.nome).trim() || it.xProd, ca: it.ca, validadeCA: it.caVal || '', caSituacao: it.caSit || '', categoria: '', vidaUtilDias: 0, custo: it.vUnCom, estoque: it.qtd, estoqueMin: 0, ultimaNF: nf.numero, ultimaEntrada: nf.data, criadoEm: agora }); reg.push({ item: it.xProd, destino: 'epi', id: ref.id, qtd: it.qtd }); }
+        } else {
+          const cods = codigosLivres(it.base || codigoBase(it, nf), it.qtd);
+          for (const c of cods) { const ref = db.collection('ferramentas').doc(); await ref.set({ codigo: c, descricao: it.xProd, categoria: it.cat, marcaModelo: '', numSerie: '', valor: it.vUnCom, dataCompra: nf.data, nf: nf.numero, fornecedor: nf.emitente, status: 'disponivel', criadoEm: agora }); await sleep(30); }
+          reg.push({ item: it.xProd, destino: 'ferramenta', codigos: cods, qtd: it.qtd });
+        }
+        await sleep(40);
+      }
+      if (nf.chave) await db.doc('notas/' + nf.chave).set({ chave: nf.chave, numero: nf.numero, serie: nf.serie, data: nf.data, emitente: nf.emitente, cnpj: nf.cnpj, total: nf.total, itens: reg, importadoEm: agora, por: S.uid || '' });
+      toast(`NF ${nf.numero}: ${reg.length} item(ns) lançado(s).`, 'ok');
+      if (notas.length > idx + 1) setTimeout(() => abrirNFe(notas, idx + 1), 600); else closeModal();
+    } catch (er) { handleErr(er); btn.disabled = false; btn.textContent = 'Lançar no estoque'; }
+  };
+}
 const IMP = {
   ferr: { t: 'Importar ferramentas', cols: 'Código | Descrição | Categoria | Nº de série | Validade calibração (dd/mm/aaaa) | Valor (R$) | Data de compra', ex: 'MEG-001\tMegôhmetro 5 kV\tInstrumento\t12345\t15/03/2027\t8500\t10/01/2025',
     key: c => c[0] && c[1] ? 'c:' + norm(c[0]) : null, exists: c => S.ferr.some(x => norm(x.codigo) === norm(c[0])),
@@ -1649,11 +1821,11 @@ function osDa(funcao) {
   OSF.forEach(([k]) => { const v = ks.map(x => (x.os || {})[k]).find(v => str(v).trim()); if (v) o[k] = v; else { o[k] = m[k]; modelo = true; } });
   return { os: o, modelo };
 }
-function PDFW() {
-  const doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4' }); const L = 15, R = 195, B = 282; const W = R - L; let y = 15;
+function PDFW(existente) {
+  const doc = existente || new window.jspdf.jsPDF({ unit: 'mm', format: 'a4' }); if (existente) doc.addPage('a4', 'portrait'); const L = 15, R = 195, B = 282; const W = R - L; let y = 15;
   const P = {
     doc, L, R, W, get y() { return y; }, set y(v) { y = v; },
-    newPage() { doc.addPage(); y = 15; },
+    newPage() { doc.addPage('a4', 'portrait'); y = 15; },
     need(h) { if (y + h > B) { P.newPage(); return true; } return false; },
     font(size, bold, color) { doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(size); doc.setTextColor.apply(doc, color || [30, 33, 40]); },
     text(t, o) { o = o || {}; const size = o.size || 9; P.font(size, o.bold, o.color); const lh = size * 0.3528 * 1.38; const lines = doc.splitTextToSize(str(t), W - (o.indent || 0)); lines.forEach(l => { P.need(lh); doc.text(l, L + (o.indent || 0), y + lh * 0.78); y += lh; }); y += (o.gap == null ? 1 : o.gap); },
@@ -1741,8 +1913,8 @@ async function gerarDocsFunc(f, keys) {
   let P = null, doc, modelo = false;
   if (temP) { P = PDFW(); doc = P.doc; if (keys.includes('ficha')) fichaInto(P, f); if (keys.includes('os')) { if (keys.includes('ficha')) P.newPage(); modelo = osInto(P, f); } }
   else doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape' });
-  regs.forEach((r, i) => certInto(doc, r, temP || i > 0));
   if (P) P.footer(str(f.nome) + ' · gerado em ' + fmtDT(new Date().toISOString()));
+  certsComLista(doc, regs, temP);
   const nome = 'documentos_' + norm(f.nome).replace(/[^a-z0-9]+/g, '_') + '_' + todayStr() + '.pdf';
   const dl = await use('downloads'); if (!dl) return toast('Download indisponível neste aparelho.', 'bad');
   try { await dl.save({ filename: nome, data: doc.output('blob') }); toast(`PDF com ${keys.length} documento(s) pronto.`, 'ok'); } catch (er) { if (!(er && er.code === 'declined')) toast('Não foi possível salvar o PDF.', 'bad'); }
@@ -2080,20 +2252,39 @@ async function gerarCertificados(regs, nome) {
   toast('Gerando certificado(s)…');
   try { await loadPDF(); } catch (_) { return toast('Sem conexão para gerar o PDF.', 'bad'); }
   const doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape' });
-  regs.forEach((r, i) => certInto(doc, r, i > 0));
+  const grupo = r => (r.turma || r.id) + '|' + r.tipoId;
+  certsComLista(doc, regs.slice().sort((a, b) => grupo(a).localeCompare(grupo(b)) || str(a.nome).localeCompare(str(b.nome), 'pt')), false);
   const dl = await use('downloads'); if (!dl) return toast('Download indisponível neste aparelho.', 'bad');
   try { await dl.save({ filename: nome, data: doc.output('blob') }); toast(`PDF com ${regs.length} certificado(s) pronto.`, 'ok'); } catch (er) { if (!(er && er.code === 'declined')) toast('Não foi possível salvar o PDF.', 'bad'); }
+}
+function listaInto(P, d, parts) {
+  const doc = P.doc;
+  P.header('LISTA DE PRESENÇA', 'Treinamento · NR-01, item 1.7');
+  P.box([['Treinamento', d.t.nome], ['Carga horária', d.ch + 'h'], ['Início', fmtD(d.inicio)], ['Término', fmtD(d.termino)], ['Local', d.local], ['Instrutor', d.instrutor + ' · ' + d.instrutorQualif]]);
+  const cols = [['Nº', 10], ['Nome completo', 78], ['Matrícula', 22], ['Função', 30], ['Assinatura', 40]];
+  const th = () => { P.need(8); doc.setFillColor(20, 33, 61); doc.rect(P.L, P.y, P.W, 6.5, 'F'); P.font(8, true, [255, 255, 255]); let x = P.L; cols.forEach(([t, w]) => { doc.text(t, x + 1.5, P.y + 4.4); x += w; }); P.y += 6.5; };
+  th();
+  parts.forEach((p, i) => { if (P.need(11)) th(); let x = P.L; [String(i + 1), p.nome, p.matricula, p.funcao].forEach((v, j) => { P.font(8.5); doc.text(doc.splitTextToSize(str(v), cols[j][1] - 3)[0] || '', x + 1.5, P.y + 6.5); x += cols[j][1]; }); doc.setDrawColor(200); doc.setLineWidth(0.15); doc.line(P.L, P.y + 10, P.R, P.y + 10); P.y += 10; });
+  P.sign(['Instrutor · ' + d.instrutor, 'Responsável técnico · ' + d.rt].concat(d.tst && norm(d.tst) !== norm(d.instrutor) && norm(d.tst) !== norm(d.rt) ? ['Técnico de Segurança · ' + d.tst + (d.tstRegistro ? ' · ' + d.tstRegistro : '')] : []));
+}
+/* dados da lista a partir de um registro de treinamento: todos da mesma turma e do mesmo tipo */
+function listaDoRegistro(r) {
+  const parts = S.tr.filter(x => x.turma && x.turma === r.turma && x.tipoId === r.tipoId).sort((a, b) => str(a.nome).localeCompare(str(b.nome), 'pt'));
+  return { d: { t: { nome: r.tipoNome, norma: r.norma }, ch: num(r.cargaHoraria), inicio: r.inicio, termino: r.termino, local: r.local, instrutor: str(r.instrutor), instrutorQualif: str(r.instrutorQualif), rt: str(r.rt), tst: str(r.tst), tstRegistro: str(r.tstRegistro) }, parts: (parts.length ? parts : [r]).map(x => ({ nome: x.nome, matricula: x.matricula, funcao: x.funcao })) };
+}
+/* certificados de uma lista de registros: frente + verso de cada um; a lista de presença da turma entra logo depois do último certificado daquela turma/tipo */
+function certsComLista(doc, regs, primeiraNova) {
+  const grupo = r => (r.turma || r.id) + '|' + r.tipoId;
+  regs.forEach((r, i) => {
+    certInto(doc, r, primeiraNova || i > 0);
+    const prox = regs[i + 1];
+    if (!prox || grupo(prox) !== grupo(r)) { const L = listaDoRegistro(r); const P = PDFW(doc); listaInto(P, L.d, L.parts); P.font(7, false, [140, 146, 156]); doc.text('Lista de presença · ' + str(r.tipoNome) + ' · gerada em ' + fmtDT(new Date().toISOString()), P.L, 290); }
+  });
 }
 async function gerarLista(d, parts) {
   toast('Gerando lista de presença…');
   try { await loadPDF(); } catch (_) { return toast('Sem conexão para gerar o PDF.', 'bad'); }
-  const P = PDFW(), doc = P.doc;
-  P.header('LISTA DE PRESENÇA', 'Treinamento · NR-01, item 1.7');
-  P.box([['Treinamento', d.t.nome], ['Carga horária', d.ch + 'h'], ['Início', fmtD(d.inicio)], ['Término', fmtD(d.termino)], ['Local', d.local], ['Instrutor', d.instrutor + ' · ' + d.instrutorQualif]]);
-  const cols = [['Nº', 10], ['Nome completo', 78], ['Matrícula', 22], ['Função', 30], ['Assinatura', 40]];
-  P.need(8); doc.setFillColor(20, 33, 61); doc.rect(P.L, P.y, P.W, 6.5, 'F'); P.font(8, true, [255, 255, 255]); let x = P.L; cols.forEach(([t, w]) => { doc.text(t, x + 1.5, P.y + 4.4); x += w; }); P.y += 6.5;
-  parts.forEach((p, i) => { P.need(11); x = P.L; [String(i + 1), p.nome, p.matricula, p.funcao].forEach((v, j) => { P.font(8.5); doc.text(doc.splitTextToSize(str(v), cols[j][1] - 3)[0] || '', x + 1.5, P.y + 6.5); x += cols[j][1]; }); doc.setDrawColor(200); doc.setLineWidth(0.15); doc.line(P.L, P.y + 10, P.R, P.y + 10); P.y += 10; });
-  P.sign(['Instrutor · ' + d.instrutor, 'Responsável técnico · ' + d.rt].concat(d.tst && norm(d.tst) !== norm(d.instrutor) && norm(d.tst) !== norm(d.rt) ? ['Técnico de Segurança · ' + d.tst] : []));
+  const P = PDFW(); listaInto(P, d, parts);
   P.footer('Gerado em ' + fmtDT(new Date().toISOString()));
   await salvarPDF(P, 'lista_presenca_' + norm(d.t.norma || d.t.nome).replace(/[^a-z0-9]+/g, '_') + '_' + d.inicio + '.pdf', 1);
 }
