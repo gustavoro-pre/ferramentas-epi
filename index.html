@@ -27,6 +27,8 @@ button,input,select,textarea{font:inherit;color:inherit}
 header{position:sticky;top:0;z-index:20;background:var(--ink);color:#fff;border-bottom:4px solid var(--accent)}
 .hwrap{max-width:980px;margin:0 auto;padding:12px 16px;display:flex;align-items:center;gap:12px}
 .logo{width:34px;height:34px;border-radius:8px;background:var(--accent);display:grid;place-items:center;flex:none}
+.logo.img{background:#fff;width:auto;min-width:34px;max-width:96px;padding:3px 5px}.logo.img img{max-height:28px;max-width:86px;display:block}
+.logoprev{display:flex;align-items:center;gap:14px;margin:6px 0 4px}.logoprev .lp{width:160px;height:64px;border:1px dashed var(--line,#ccd);border-radius:8px;display:grid;place-items:center;background:#fff}.logoprev img{max-width:150px;max-height:56px}
 .htitle{font-weight:700;font-size:17px;letter-spacing:.2px;line-height:1.1}
 .hsub{font-size:12px;opacity:.7}
 .conn{margin-left:auto;font-size:12px;padding:4px 10px;border-radius:99px;background:rgba(255,255,255,.12);white-space:nowrap}
@@ -275,7 +277,7 @@ table.tb{width:100%;border-collapse:collapse;font-size:13px}
 <!-- CADASTROS -->
 <section id="v-cadastros" class="view" hidden>
   <div class="seg" id="c-seg">
-    <button data-sub="ferramentas" class="on">Ferramentas</button><button data-sub="epis">EPIs</button><button data-sub="funcionarios">Funcionários</button><button data-sub="kits">Kits</button><button data-sub="regras">Regras</button><button data-sub="trein">Treinamentos</button><button data-sub="usuarios">Usuários</button>
+    <button data-sub="ferramentas" class="on">Ferramentas</button><button data-sub="epis">EPIs</button><button data-sub="funcionarios">Funcionários</button><button data-sub="kits">Kits</button><button data-sub="regras">Regras</button><button data-sub="trein">Treinamentos</button><button data-sub="empresa">Empresa</button><button data-sub="usuarios">Usuários</button>
   </div>
   <div id="sub-ferramentas" class="sub">
     <div class="head"><h2>Ferramentas</h2><button class="btn ghost" id="f-qr" type="button">Etiquetas QR</button><button class="btn ghost" id="f-imp" type="button">Importar lista</button><button class="btn primary" id="f-new" type="button">+ Nova</button></div>
@@ -313,7 +315,10 @@ table.tb{width:100%;border-collapse:collapse;font-size:13px}
     <p class="note" style="margin-top:0">Um kit por função define os EPIs obrigatórios (com troca periódica) e as ferramentas que vão na cautela.</p>
     <div id="k-list" class="list"></div>
   </div>
-  <div id="c-emp" style="margin-top:24px"></div>
+  <div id="sub-empresa" class="sub" hidden>
+    <div class="head"><h2>Dados da empresa</h2></div>
+    <div id="c-emp"></div>
+  </div>
   <div id="c-demo"></div>
 </section>
 </main>
@@ -952,15 +957,59 @@ $('#e-submit').onclick = async () => {
 
 /* ================= cadastros ================= */
 function renderCad() { renderFerr(); renderEpis(); renderFunc(); renderKits(); renderEmp(); renderTrein(); if (sub === 'regras') renderRegras(); if (sub === 'usuarios') renderUsuarios(); }
+function logoImg() { const e = S.emp || {}; return /^data:image\/(png|jpeg);base64,/.test(str(e.logo)) ? e : null; }
+function aplicarLogo() {
+  const el = document.querySelector('header .logo'); if (!el) return;
+  if (!el.dataset.svg) el.dataset.svg = el.innerHTML;
+  const e = logoImg();
+  if (e) { el.classList.add('img'); el.innerHTML = `<img src="${e.logo}" alt="${esc(e.nome || 'Logo')}">`; }
+  else { el.classList.remove('img'); el.innerHTML = el.dataset.svg; }
+}
+/* reduz a imagem para caber no banco (máx. ~600 px de largura) */
+function lerLogo(file) {
+  return new Promise((ok, no) => {
+    if (!/^image\/(png|jpeg|webp|gif|svg\+xml)$/.test(file.type)) return no(new Error('Use uma imagem PNG ou JPG.'));
+    const fr = new FileReader(); fr.onerror = () => no(new Error('Não foi possível ler o arquivo.'));
+    fr.onload = () => { const im = new Image(); im.onerror = () => no(new Error('Imagem inválida.')); im.onload = () => {
+      let w = im.naturalWidth || 600, h = im.naturalHeight || 200; const k = Math.min(1, 600 / w, 240 / h); w = Math.round(w * k); h = Math.round(h * k);
+      const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').drawImage(im, 0, 0, w, h);
+      let url = c.toDataURL('image/png'); if (url.length > 350000) url = (() => { const c2 = document.createElement('canvas'); c2.width = w; c2.height = h; const x = c2.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, w, h); x.drawImage(im, 0, 0, w, h); return c2.toDataURL('image/jpeg', 0.85); })();
+      if (url.length > 450000) return no(new Error('Imagem grande demais. Use um arquivo menor.'));
+      ok({ logo: url, logoW: w, logoH: h });
+    }; im.src = fr.result; };
+    fr.readAsDataURL(file);
+  });
+}
+let EMP_LOGO = null;
 function renderEmp() {
-  const e = S.emp || {};
-  $('#c-emp').innerHTML = `<div class="card"><div class="head" style="margin:0"><div style="margin-right:auto"><b>Dados da empresa</b><div class="note">${e.nome ? esc(e.nome) + (e.cnpj ? ' · CNPJ ' + esc(e.cnpj) : '') : 'Aparecem no cabeçalho da ficha de EPI e da OS. Ainda não preenchido.'}</div></div><button class="btn sm ghost" id="emp-edit">Editar</button></div></div>`;
-  $('#emp-edit').onclick = () => {
-    openModal(mtop('Dados da empresa') + `<div class="card"><label for="em-n">Razão social / nome</label><input id="em-n" value="${esc(e.nome)}">
-      <div class="grid2"><div><label for="em-c">CNPJ</label><input id="em-c" value="${esc(e.cnpj)}"></div><div><label for="em-r">Responsável SST (nome e registro)</label><input id="em-r" value="${esc(e.responsavel)}" placeholder="Ex.: Técnico de Segurança · MTE 12345"></div></div>
-      <label for="em-e">Endereço / unidade</label><input id="em-e" value="${esc(e.endereco)}" placeholder="Ex.: Contrato ArcelorMittal · Unidade X"></div>
-      <div class="actions"><button class="btn ghost" data-close>Cancelar</button><button class="btn primary" id="em-s">Salvar</button></div>`);
-    $('#em-s').onclick = async () => { if (!guardWrite()) return; try { await db.doc('config/empresa').set({ nome: $('#em-n').value.trim(), cnpj: $('#em-c').value.trim(), responsavel: $('#em-r').value.trim(), endereco: $('#em-e').value.trim() }); closeModal(); toast('Dados salvos.', 'ok'); } catch (er) { handleErr(er); } };
+  aplicarLogo();
+  if (sub !== 'empresa' || !$('#c-emp')) return;
+  const key = JSON.stringify(S.emp || {}).length + '|' + str((S.emp || {}).nome) + '|' + str((S.emp || {}).logo).length;
+  if ($('#c-emp').dataset.k === key && $('#c-emp').innerHTML) return; /* não apagar o que está sendo editado */
+  $('#c-emp').dataset.k = key;
+  const e = S.emp || {}; EMP_LOGO = null;
+  const lg = logoImg();
+  $('#c-emp').innerHTML = `<div class="card"><span class="lbl">Logo</span>
+    <div class="logoprev"><div class="lp" id="em-lp">${lg ? `<img src="${lg.logo}" alt="Logo">` : '<span class="note">Sem logo</span>'}</div>
+    <div><input type="file" id="em-file" accept="image/png,image/jpeg" hidden><button class="btn ghost sm" id="em-up" type="button">${lg ? 'Trocar logo' : 'Enviar logo'}</button>${lg ? ' <button class="btn ghost sm" id="em-rm" type="button">Remover</button>' : ''}<p class="note" style="margin:6px 0 0">PNG ou JPG. Aparece no topo do app e no cabeçalho da ficha de EPI, OS, lista de presença e certificados.</p></div></div></div>
+    <div class="card"><label for="em-n">Razão social / nome</label><input id="em-n" value="${esc(e.nome)}">
+    <div class="grid2"><div><label for="em-c">CNPJ</label><input id="em-c" value="${esc(e.cnpj)}"></div><div><label for="em-r">Responsável SST na ficha e na OS</label><input id="em-r" value="${esc(e.responsavel)}" placeholder="Ex.: Técnico de Segurança · MTE 12345"></div></div>
+    <label for="em-e">Endereço / unidade</label><input id="em-e" value="${esc(e.endereco)}" placeholder="Ex.: Contrato ArcelorMittal · Unidade X"></div>
+    <div class="card"><span class="lbl">Técnico de Segurança do Trabalho (padrão nos treinamentos)</span>
+    <div class="grid2"><div><label for="em-tn">Nome</label><input id="em-tn" value="${esc(e.tstNome)}"></div><div><label for="em-tr">Registro</label><input id="em-tr" value="${esc(e.tstRegistro)}" placeholder="Ex.: Registro MTE 000000"></div></div>
+    <label for="em-j">Jornada diária de treinamento (horas)</label><input id="em-j" type="number" min="1" max="12" value="${num(e.jornadaTreino) || 8}" style="max-width:140px">
+    <p class="note">Usada para não marcar dois treinamentos no mesmo dia além da carga diária.</p></div>
+    <div class="actions"><button class="btn primary" id="em-s">Salvar dados da empresa</button></div>`;
+  const prev = d => { $('#em-lp').innerHTML = d ? `<img src="${d.logo}" alt="Logo">` : '<span class="note">Sem logo</span>'; };
+  $('#em-up').onclick = () => $('#em-file').click();
+  $('#em-file').onchange = async ev => { const f = ev.target.files[0]; if (!f) return; try { EMP_LOGO = await lerLogo(f); prev(EMP_LOGO); toast('Logo carregado. Toque em Salvar.', 'ok'); } catch (er) { toast(er.message, 'bad'); } };
+  const rm = $('#em-rm'); if (rm) rm.onclick = () => { EMP_LOGO = { logo: '', logoW: 0, logoH: 0 }; prev(null); toast('Logo será removido ao salvar.'); };
+  $('#em-s').onclick = async () => {
+    if (!guardWrite()) return;
+    const d = Object.assign({}, S.emp || {}, { nome: $('#em-n').value.trim(), cnpj: $('#em-c').value.trim(), responsavel: $('#em-r').value.trim(), endereco: $('#em-e').value.trim(), tstNome: $('#em-tn').value.trim(), tstRegistro: $('#em-tr').value.trim(), jornadaTreino: num($('#em-j').value) || 8 }, EMP_LOGO || {});
+    const b = $('#em-s'); b.disabled = true;
+    try { await db.doc('config/empresa').set(d); document.activeElement && document.activeElement.blur(); toast('Dados da empresa salvos.', 'ok'); } catch (er) { handleErr(er); }
+    b.disabled = false;
   };
 }
 const FCH = [['todas', 'Todas'], ['disponivel', 'Disponíveis'], ['emprestada', 'Emprestadas'], ['manutencao', 'Manutenção'], ['extraviada', 'Extraviadas'], ['calib', 'Calibração'], ['baixada', 'Baixadas']];
@@ -1089,7 +1138,7 @@ function openFunc(id) {
     <datalist id="funs">${[...new Set(S.func.map(x => x.funcao).concat(S.kits.map(k => k.funcao)).filter(Boolean))].map(c => `<option value="${esc(c)}">`).join('')}</datalist>
     <datalist id="areas">${[...new Set(S.func.map(x => x.area).filter(Boolean))].map(c => `<option value="${esc(c)}">`).join('')}</datalist></div>
     <div class="actions">${f && !posse.length ? `<button class="btn danger" id="uf-del">Excluir</button>` : ''}${f ? `<button class="btn ghost" id="uf-etq">Crachá QR</button>` : ''}<button class="btn ghost" data-close>Cancelar</button><button class="btn primary" id="uf-save" ${S.canWrite === false ? 'disabled' : ''}>Salvar</button></div>
-    ${f ? `<div class="actions" style="margin-top:8px"><button class="btn ghost" id="uf-ficha">Ficha de EPI (PDF)</button><button class="btn ghost" id="uf-os">OS de Segurança (PDF)</button><button class="btn accent" id="uf-adm">Admissão: ficha + OS (PDF)</button></div>
+    ${f ? `<div class="actions" style="margin-top:8px"><button class="btn ghost" id="uf-ficha">Ficha de EPI (PDF)</button><button class="btn ghost" id="uf-os">OS de Segurança (PDF)</button><button class="btn accent" id="uf-plan">Treinamentos de admissão</button></div>
     <div class="card" style="margin-top:10px"><span class="lbl">Assinatura digital (ZapSign)</span>
     <div class="grid3"><div><label for="uf-zs">Situação</label><select id="uf-zs">${['', 'enviado', 'assinado', 'recusado'].map(x => `<option value="${x}" ${str(f.zsStatus) === x ? 'selected' : ''}>${{ '': 'Não enviado', enviado: 'Enviado para assinar', assinado: 'Assinado', recusado: 'Recusado' }[x]}</option>`).join('')}</select></div>
     <div><label for="uf-zsd">Data</label><input type="date" id="uf-zsd" value="${esc(f.zsData)}"></div><div><label for="uf-zsl">Link do documento</label><input id="uf-zsl" value="${esc(f.zsLink)}" placeholder="https://app.zapsign.com.br/…"></div></div>
@@ -1099,10 +1148,20 @@ function openFunc(id) {
     <div class="card" style="padding:6px 10px"><div class="tbwrap" style="margin:0"><table class="tb"><thead><tr><th>Data</th><th>EPI</th><th>CA</th><th class="n">Qtd</th><th>Motivo</th></tr></thead><tbody>
     ${ficha.length ? ficha.map(e => `<tr><td>${fmtD(e.data)}</td><td>${esc(e.epiNome)}${e.tamanho ? ' · ' + esc(e.tamanho) : ''}</td><td>${esc(e.ca)}${e.validadeCA && e.validadeCA < str(e.data).slice(0, 10) ? ' <span class="badge b-bad">vencido</span>' : ''}</td><td class="n">${num(e.qtd)}</td><td>${MOTGRP(e.motivo) === 'evit' ? `<span class="badge b-bad">${esc(MOT[e.motivo])}</span>` : esc(MOT[e.motivo] || e.motivo)}</td></tr>`).join('') : '<tr><td colspan="5" class="note">Nenhuma entrega registrada.</td></tr>'}
     </tbody></table></div></div>
+    <h3>Documentos</h3><div class="card" id="uf-docs">${(() => { const L = S.tr.filter(r => r.funcionarioId === f.id).sort((a, b) => str(a.inicio).localeCompare(str(b.inicio)));
+      const ln = (k, t, sub, on) => `<label style="display:flex;gap:10px;align-items:center;color:inherit;font-size:15px;margin:6px 0"><input type="checkbox" data-doc="${k}" ${on ? 'checked' : ''} style="width:20px;height:20px"><span>${t}${sub ? `<div class="note">${sub}</div>` : ''}</span></label>`;
+      return ln('ficha', 'Ficha de EPI (NR-06)', ficha.length + ' entrega(s) registrada(s)', true) + ln('os', 'OS de Segurança (NR-01)', esc(f.funcao || 'Sem função'), true)
+        + (L.length ? '<span class="lbl" style="margin-top:8px">Certificados</span>' + L.map(r => ln('tr:' + r.id, esc(r.norma || r.tipoNome), `${fmtD(r.inicio)}${r.termino !== r.inicio ? ' a ' + fmtD(r.termino) : ''} · ${num(r.cargaHoraria)}h · ${trBadge(r)}`, trState(r) !== 'agendado')).join('') : '<p class="note">Nenhum treinamento ainda. Use “Treinamentos de admissão”.</p>');
+    })()}<div class="actions" style="margin-top:8px"><button class="btn ghost sm" id="uf-dall" type="button">Marcar todos</button><button class="btn primary" id="uf-dgo" type="button">Baixar selecionados (PDF único)</button></div></div>
     <h3>Treinamentos</h3><div class="list">${(() => { const L = S.tr.filter(r => r.funcionarioId === f.id).sort((a, b) => str(b.termino).localeCompare(str(a.termino))); return L.length ? L.map(trRow).join('') : '<div class="empty">Nenhum treinamento registrado.</div>'; })()}</div>
+    <h3>Agenda de treinamentos</h3><div class="card" style="padding:6px 10px">${agendaHtml(f.id)}</div>
     <h3>Histórico de cautelas</h3><div class="list">${cautList(histFor('funcionarioId', f.id))}</div>` : ''}`);
   $('#uf-save').onclick = () => saveFunc(f);
-  if (f) $('#uf-adm').onclick = () => gerarAdmissao(f);
+  if (f) {
+    $('#uf-plan').onclick = () => openPlano(f.id);
+    $('#uf-dall').onclick = () => $$('#uf-docs [data-doc]').forEach(c => c.checked = true);
+    $('#uf-dgo').onclick = () => { const k = $$('#uf-docs [data-doc]').filter(c => c.checked).map(c => c.dataset.doc); if (!k.length) return toast('Marque ao menos um documento.', 'bad'); gerarDocsFunc(f, k); };
+  }
   if (f) { $('#uf-ficha').onclick = () => gerarFichas([f], 'ficha_epi_' + norm(f.nome).replace(/[^a-z0-9]+/g, '_') + '.pdf'); $('#uf-os').onclick = () => gerarOS([f], 'os_seguranca_' + norm(f.nome).replace(/[^a-z0-9]+/g, '_') + '.pdf'); }
   const ue = $('#uf-etq'); if (ue) ue.onclick = () => gerarEtiquetas('fun', [f], 'cracha_' + norm(f.nome).replace(/[^a-z0-9]+/g, '_') + '.pdf');
   const del = $('#uf-del'); if (del) armDelete(del, () => db.doc('funcionarios/' + f.id).delete());
@@ -1601,16 +1660,17 @@ function PDFW() {
     bullets(t) { const items = str(t).split(/;|\n/).map(x => x.trim().replace(/\.$/, '')).filter(Boolean).map(x => x[0].toUpperCase() + x.slice(1)); items.forEach(it => { P.font(9); const lh = 9 * 0.3528 * 1.38; const lines = doc.splitTextToSize(it, W - 6); P.need(lh); doc.text('•', L + 1.5, y + lh * 0.78); lines.forEach(l => { P.need(lh); doc.text(l, L + 6, y + lh * 0.78); y += lh; }); y += 0.6; }); y += 1; },
     section(n, t) { P.need(12); y += 2; doc.setFillColor(236, 239, 244); doc.rect(L, y, W, 6.5, 'F'); P.font(9.5, true, [20, 33, 61]); doc.text((n ? n + '. ' : '') + t.toUpperCase(), L + 2, y + 4.5); y += 9; },
     header(titulo, sub) {
-      const e = S.emp || {};
-      P.font(11, true, [20, 33, 61]); doc.text(str(e.nome) || 'Nome da empresa (preencha em Cadastros)', L, y + 4);
-      P.font(8, false, [90, 96, 110]); doc.text([e.cnpj ? 'CNPJ ' + e.cnpj : '', e.endereco || ''].filter(Boolean).join(' · ') || ' ', L, y + 8.5);
+      const e = S.emp || {}; let lx = L; const lg = logoImg();
+      if (lg) { const h = 11, w = Math.min(38, h * (num(lg.logoW) || 3) / (num(lg.logoH) || 1)); try { doc.addImage(lg.logo, /jpeg/.test(lg.logo.slice(0, 20)) ? 'JPEG' : 'PNG', L, y - 0.5, w, w * (num(lg.logoH) || 1) / (num(lg.logoW) || 3)); lx = L + w + 4; } catch (_) {} }
+      P.font(11, true, [20, 33, 61]); doc.text(doc.splitTextToSize(str(e.nome) || 'Nome da empresa (preencha em Cadastros → Empresa)', 100 - (lx - L))[0], lx, y + 4);
+      P.font(8, false, [90, 96, 110]); doc.text(doc.splitTextToSize([e.cnpj ? 'CNPJ ' + e.cnpj : '', e.endereco || ''].filter(Boolean).join(' · ') || ' ', 100 - (lx - L))[0], lx, y + 8.5);
       P.font(12.5, true, [20, 33, 61]); doc.text(titulo, R, y + 4, { align: 'right' });
       P.font(8, false, [90, 96, 110]); doc.text(sub, R, y + 8.5, { align: 'right' });
       y += 12; doc.setDrawColor(242, 169, 0); doc.setLineWidth(0.8); doc.line(L, y, R, y); y += 5;
     },
     box(rows) { const h = Math.ceil(rows.length / 2) * 6 + 3; P.need(h); doc.setDrawColor(210); doc.setLineWidth(0.2); doc.rect(L, y, W, h); rows.forEach(([k, v], i) => { const cx = L + 3 + (i % 2) * (W / 2), cy = y + 5 + Math.floor(i / 2) * 6; P.font(7.5, false, [110, 116, 128]); doc.text(k, cx, cy); P.font(9.5, true); doc.text(doc.splitTextToSize(str(v) || '—', W / 2 - 30)[0], cx + 24, cy); }); y += h + 4; },
     sign(labels) { P.need(24); y += 14; const n = labels.length, gap = 10, w = (W - gap * (n - 1)) / n; labels.forEach((l, i) => { const x = L + i * (w + gap); doc.setDrawColor(80); doc.setLineWidth(0.3); doc.line(x, y, x + w, y); P.font(8, false, [60, 66, 80]); doc.text(doc.splitTextToSize(l, w), x + w / 2, y + 4, { align: 'center' }); }); y += 12; },
-    footer(txt) { const n = doc.getNumberOfPages(); for (let i = 1; i <= n; i++) { doc.setPage(i); P.font(7, false, [140, 146, 156]); doc.text(txt, L, 290); doc.text('Página ' + i + ' de ' + n, R, 290, { align: 'right' }); } }
+    footer(txt) { const n = doc.getNumberOfPages(); for (let i = 1; i <= n; i++) { doc.setPage(i); if (doc.internal.pageSize.getHeight() < 250) continue; P.font(7, false, [140, 146, 156]); doc.text(txt, L, 290); doc.text('Página ' + i + ' de ' + n, R, 290, { align: 'right' }); } }
   };
   return P;
 }
@@ -1673,6 +1733,21 @@ async function gerarAdmissao(f) {
   await salvarPDF(P, 'admissao_ficha_epi_e_os_' + norm(f.nome).replace(/[^a-z0-9]+/g, '_') + '.pdf', 2);
   if (m) setTimeout(() => toast('A OS usou o texto-modelo da função. Revise em Cadastros → Kits.', 'bad'), 3600);
 }
+async function gerarDocsFunc(f, keys) {
+  toast('Gerando documentos…');
+  try { await loadPDF(); } catch (_) { return toast('Sem conexão para gerar o PDF.', 'bad'); }
+  const regs = keys.filter(k => k.startsWith('tr:')).map(k => S.tr.find(r => r.id === k.slice(3))).filter(Boolean);
+  const temP = keys.includes('ficha') || keys.includes('os');
+  let P = null, doc, modelo = false;
+  if (temP) { P = PDFW(); doc = P.doc; if (keys.includes('ficha')) fichaInto(P, f); if (keys.includes('os')) { if (keys.includes('ficha')) P.newPage(); modelo = osInto(P, f); } }
+  else doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape' });
+  regs.forEach((r, i) => certInto(doc, r, temP || i > 0));
+  if (P) P.footer(str(f.nome) + ' · gerado em ' + fmtDT(new Date().toISOString()));
+  const nome = 'documentos_' + norm(f.nome).replace(/[^a-z0-9]+/g, '_') + '_' + todayStr() + '.pdf';
+  const dl = await use('downloads'); if (!dl) return toast('Download indisponível neste aparelho.', 'bad');
+  try { await dl.save({ filename: nome, data: doc.output('blob') }); toast(`PDF com ${keys.length} documento(s) pronto.`, 'ok'); } catch (er) { if (!(er && er.code === 'declined')) toast('Não foi possível salvar o PDF.', 'bad'); }
+  if (modelo) setTimeout(() => toast('A OS usou o texto-modelo da função. Revise em Cadastros → Kits.', 'bad'), 3600);
+}
 function osInto(P, f) {
   const doc = P.doc;
   {
@@ -1726,21 +1801,22 @@ const TR_MODELOS = [
 const addMonths = (d, m) => { if (!d || !m) return ''; const x = new Date(d + 'T12:00:00'); x.setMonth(x.getMonth() + m); return ymd(x); };
 const pessoaKey = r => r.funcionarioId || ('n:' + norm(r.nome));
 const grupoKey = r => r.norma ? 'N:' + norm(r.norma) : 'T:' + r.tipoId;
-function trState(r) { const v = str(r.validade); if (!v) return 'ok'; if (v < todayStr()) return 'vencido'; if (v <= addDays(60)) return 'vence'; return 'ok'; }
-function trBadge(r) { const st = trState(r); return !r.validade ? '<span class="badge b-mut">Sem validade</span>' : st === 'vencido' ? `<span class="badge b-bad">Vencido ${fmtD(r.validade)}</span>` : st === 'vence' ? `<span class="badge b-warn">Vence ${fmtD(r.validade)}</span>` : `<span class="badge b-ok">Válido até ${fmtD(r.validade)}</span>`; }
+function trState(r) { if (str(r.inicio) > todayStr()) return 'agendado'; const v = str(r.validade); if (!v) return 'ok'; if (v < todayStr()) return 'vencido'; if (v <= addDays(60)) return 'vence'; return 'ok'; }
+function trBadge(r) { const st = trState(r); return st === 'agendado' ? `<span class="badge b-info">Agendado ${fmtD(r.inicio)}</span>` : !r.validade ? '<span class="badge b-mut">Sem validade</span>' : st === 'vencido' ? `<span class="badge b-bad">Vencido ${fmtD(r.validade)}</span>` : st === 'vence' ? `<span class="badge b-warn">Vence ${fmtD(r.validade)}</span>` : `<span class="badge b-ok">Válido até ${fmtD(r.validade)}</span>`; }
 /* situação atual: só o registro mais recente de cada pessoa por norma conta */
 function treinStatus() {
-  const last = {}; S.tr.forEach(r => { const k = pessoaKey(r) + '|' + grupoKey(r); if (!last[k] || str(last[k].termino) < str(r.termino)) last[k] = r; });
+  const last = {}; const feito = r => str(r.inicio) <= todayStr();
+  S.tr.forEach(r => { const k = pessoaKey(r) + '|' + grupoKey(r); const o = last[k]; if (!o || (feito(r) && !feito(o)) || (feito(r) === feito(o) && str(o.termino) < str(r.termino))) last[k] = r; });
   const ativos = new Set(S.func.filter(f => f.ativo !== false).map(f => f.id));
   return Object.values(last).filter(r => !r.funcionarioId || ativos.has(r.funcionarioId)).map(r => ({ r, st: trState(r) })).sort((a, b) => str(a.r.validade).localeCompare(str(b.r.validade)));
 }
 function trRow(r) { return `<button class="item" data-trein="${esc(r.id)}"><div class="main"><div class="t1">${esc(r.nome)}</div><div class="t2">${esc(r.tipoNome)} · ${num(r.cargaHoraria)}h · ${fmtD(r.inicio)}${r.termino && r.termino !== r.inicio ? ' a ' + fmtD(r.termino) : ''}</div><div class="t2">Instrutor: ${esc(r.instrutor || '—')} · <span class="code">${esc(r.codigo)}</span></div></div><div class="side">${trBadge(r)}</div></button>`; }
 let tFilter = 'atual';
 function renderTrein() {
-  const CH = [['atual', 'Situação atual'], ['vencido', 'Vencidos'], ['vence', 'Vencem em 60 dias'], ['todos', 'Histórico completo']];
+  const CH = [['atual', 'Situação atual'], ['vencido', 'Vencidos'], ['vence', 'Vencem em 60 dias'], ['agendado', 'Agendados'], ['todos', 'Histórico completo']];
   $('#t-chips').innerHTML = CH.map(([k, t]) => `<button class="chip ${tFilter === k ? 'on' : ''}" data-tch="${k}">${t}</button>`).join('');
   const q = norm($('#t-q').value);
-  let L = tFilter === 'todos' ? S.tr.slice().sort((a, b) => str(b.termino).localeCompare(str(a.termino))) : treinStatus().filter(x => tFilter === 'atual' || x.st === tFilter).map(x => x.r);
+  let L = tFilter === 'todos' ? S.tr.slice().sort((a, b) => str(b.termino).localeCompare(str(a.termino))) : tFilter === 'agendado' ? S.tr.filter(r => trState(r) === 'agendado').sort((a, b) => str(a.inicio).localeCompare(str(b.inicio))) : treinStatus().filter(x => tFilter === 'atual' || x.st === tFilter).map(x => x.r);
   if (q) L = L.filter(r => norm([r.nome, r.tipoNome, r.norma, r.instrutor, r.matricula, r.codigo].join(' ')).includes(q));
   $('#t-list').innerHTML = L.length ? L.slice(0, 300).map(trRow).join('') : `<div class="empty">${S.tr.length ? 'Nada encontrado.' : 'Nenhum treinamento registrado. Cadastre os tipos e depois toque em “+ Nova turma”.'}</div>`;
 }
@@ -1768,11 +1844,15 @@ function openTipo(id) {
     <div class="grid3"><div><label for="tt-no">Norma</label><input id="tt-no" value="${v('norma')}" placeholder="NR-35"></div><div><label for="tt-ch">Carga horária (h) *</label><input id="tt-ch" type="number" min="1" value="${t ? num(t.cargaHoraria) : ''}"></div><div><label for="tt-va">Validade (meses)</label><input id="tt-va" type="number" min="0" value="${t ? num(t.validadeMeses) : ''}" placeholder="0 = sem validade"></div></div>
     <label for="tt-co">Conteúdo programático (um item por linha) *</label><textarea id="tt-co" rows="8">${v('conteudo')}</textarea>
     <p class="note">Treinamentos da mesma norma (ex.: NR-10 Básico e NR-10 Reciclagem) contam juntos: vale sempre o mais recente.</p></div>
+    <div class="card"><span class="lbl">Na admissão, este treinamento é…</span>
+    ${funcoesTodas().length ? `<div class="tbwrap" style="margin:0"><table class="tb"><thead><tr><th>Função</th><th>Obrigatório</th><th>Às vezes</th></tr></thead><tbody>${funcoesTodas().map(fu => `<tr><td>${esc(fu)}</td><td><input type="checkbox" data-tto="${esc(fu)}" ${(t && (t.obrig || []).includes(fu)) ? 'checked' : ''}></td><td><input type="checkbox" data-tte="${esc(fu)}" ${(t && (t.event || []).includes(fu)) ? 'checked' : ''}></td></tr>`).join('')}</tbody></table></div>` : '<p class="note">Cadastre funcionários com função para marcar aqui.</p>'}
+    <p class="note">Obrigatório já vem marcado na admissão do funcionário dessa função. “Às vezes” aparece em destaque para você decidir.</p></div>
     <div class="actions">${t ? '<button class="btn danger" id="tt-del">Excluir</button>' : ''}<button class="btn ghost" id="tt-back">Voltar</button><button class="btn primary" id="tt-save">Salvar</button></div>`);
   $('#tt-back').onclick = openTipos;
   $('#tt-save').onclick = async () => {
     if (!guardWrite()) return;
-    const d = { nome: $('#tt-n').value.trim(), norma: $('#tt-no').value.trim(), cargaHoraria: num($('#tt-ch').value), validadeMeses: num($('#tt-va').value), conteudo: $('#tt-co').value.trim() };
+    const d = { nome: $('#tt-n').value.trim(), norma: $('#tt-no').value.trim(), cargaHoraria: num($('#tt-ch').value), validadeMeses: num($('#tt-va').value), conteudo: $('#tt-co').value.trim(),
+      obrig: $$('#sheet [data-tto]').filter(c => c.checked).map(c => c.dataset.tto), event: $$('#sheet [data-tte]').filter(c => c.checked && !$(`#sheet [data-tto="${CSS.escape(c.dataset.tte)}"]`).checked).map(c => c.dataset.tte) };
     if (!d.nome || !d.cargaHoraria || !d.conteudo) return toast('Preencha nome, carga horária e conteúdo programático.', 'bad');
     try { if (t) await db.doc('trein_tipos/' + t.id).update(d); else await db.collection('trein_tipos').doc().set(Object.assign({ criadoEm: new Date().toISOString() }, d)); toast('Tipo salvo.', 'ok'); setTimeout(openTipos, 300); } catch (e) { handleErr(e); }
   };
@@ -1794,7 +1874,8 @@ function openTurma() {
     <div class="card"><span class="lbl">Instrutor e responsável técnico</span>
     <div class="grid2"><div><label for="tu-in">Instrutor *</label><input id="tu-in"></div><div><label for="tu-iq">Qualificação do instrutor *</label><input id="tu-iq" placeholder="Ex.: Eng. Eletricista · CREA 000000"></div></div>
     <label style="display:flex;gap:8px;align-items:center;color:inherit;font-size:15px;margin-top:10px"><input type="checkbox" id="tu-same" checked> O instrutor também é o responsável técnico</label>
-    <div id="tu-rtbox" class="hidden"><div class="grid2"><div><label for="tu-rn">Responsável técnico</label><input id="tu-rn"></div><div><label for="tu-rq">Qualificação do RT</label><input id="tu-rq"></div></div></div></div>
+    <div id="tu-rtbox" class="hidden"><div class="grid2"><div><label for="tu-rn">Responsável técnico</label><input id="tu-rn"></div><div><label for="tu-rq">Qualificação do RT</label><input id="tu-rq"></div></div></div>
+    <div class="grid2"><div><label for="tu-tn">Técnico de Segurança do Trabalho</label><input id="tu-tn" value="${esc(e.tstNome || '')}"></div><div><label for="tu-tr">Registro do TST</label><input id="tu-tr" value="${esc(e.tstRegistro || '')}" placeholder="Ex.: Registro MTE 000000"></div></div></div>
     <div class="card"><span class="lbl">Participantes</span>
     <div class="srow"><input id="tu-q" placeholder="Buscar funcionário pelo nome ou matrícula" autocomplete="off"><button class="qbtn" type="button" id="tu-ext" title="Adicionar pessoa sem cadastro" aria-label="Adicionar pessoa sem cadastro">+</button></div>
     <div id="tu-res" class="results"></div><div id="tu-parts" style="margin-top:8px"></div>
@@ -1817,10 +1898,11 @@ function openTurma() {
   drawParts();
   const dados = () => {
     const t = S.tt.find(x => x.id === $('#tu-t').value);
-    const d = { t, inicio: $('#tu-i').value, termino: $('#tu-f').value, ch: num($('#tu-ch').value), local: $('#tu-l').value.trim(), instrutor: $('#tu-in').value.trim(), instrutorQualif: $('#tu-iq').value.trim(), same: $('#tu-same').checked, rt: $('#tu-rn').value.trim(), rtQualif: $('#tu-rq').value.trim() };
+    const d = { t, inicio: $('#tu-i').value, termino: $('#tu-f').value, ch: num($('#tu-ch').value), local: $('#tu-l').value.trim(), instrutor: $('#tu-in').value.trim(), instrutorQualif: $('#tu-iq').value.trim(), same: $('#tu-same').checked, rt: $('#tu-rn').value.trim(), rtQualif: $('#tu-rq').value.trim(), tst: $('#tu-tn').value.trim(), tstRegistro: $('#tu-tr').value.trim() };
     if (d.same) { d.rt = d.instrutor; d.rtQualif = d.instrutorQualif; }
     const err = !t ? 'Escolha o tipo de treinamento.' : !d.inicio || !d.termino ? 'Informe as datas.' : d.termino < d.inicio ? 'A data de término é anterior ao início.' : !d.ch ? 'Informe a carga horária.' : !d.local ? 'Informe o local.' : !d.instrutor || !d.instrutorQualif ? 'Informe o instrutor e a qualificação.' : !d.rt ? 'Informe o responsável técnico.' : !TU.parts.length ? 'Adicione ao menos um participante.' : TU.parts.some(p => p.nome.trim().split(/\s+/).length < 2) ? 'Escreva o nome completo de cada participante.' : '';
     if (err) { toast(err, 'bad'); return null; }
+    for (const p of TU.parts) { if (!p.funcionarioId) continue; const c = conflitos(p.funcionarioId, d.inicio, d.termino, d.ch); if (c.length) { toast(`${p.nome}: ${c[0]}`, 'bad'); return null; } }
     return d;
   };
   $('#tu-lista').onclick = () => { const d = dados(); if (d) gerarLista(d, TU.parts); };
@@ -1831,7 +1913,7 @@ function openTurma() {
     try {
       for (const [i, p] of TU.parts.entries()) {
         const r = { turma, funcionarioId: p.funcionarioId, nome: p.nome.trim(), matricula: p.matricula, funcao: p.funcao, tipoId: d.t.id, tipoNome: str(d.t.nome), norma: str(d.t.norma), cargaHoraria: d.ch, conteudo: str(d.t.conteudo),
-          inicio: d.inicio, termino: d.termino, validade: addMonths(d.termino, num(d.t.validadeMeses)), local: d.local, instrutor: d.instrutor, instrutorQualif: d.instrutorQualif, rt: d.rt, rtQualif: d.rtQualif,
+          inicio: d.inicio, termino: d.termino, validade: addMonths(d.termino, num(d.t.validadeMeses)), local: d.local, instrutor: d.instrutor, instrutorQualif: d.instrutorQualif, rt: d.rt, rtQualif: d.rtQualif, tst: d.tst, tstRegistro: d.tstRegistro,
           codigo: 'T' + d.termino.replace(/-/g, '').slice(2) + '-' + turma.slice(-4) + '-' + String(i + 1).padStart(2, '0'), criadoEm: new Date().toISOString(), por: S.uid || '' };
         await db.collection('treinamentos').doc().set(r); regs.push(r); await sleep(50);
       }
@@ -1840,50 +1922,165 @@ function openTurma() {
     } catch (e2) { handleErr(e2); btn.disabled = false; btn.textContent = 'Salvar e gerar certificados'; }
   };
 }
+/* ---------- agenda de treinamentos: carga diária e conflitos ---------- */
+const jornada = () => num((S.emp || {}).jornadaTreino) || 8;
+const dow = d => new Date(d + 'T12:00:00').getDay();
+function diasDe(ini, fim) { const out = []; if (!ini || !fim || fim < ini) return out; let d = ini, n = 0; while (d <= fim && n < 400) { out.push(d); d = addDays(1, d); n++; } const uteis = out.filter(x => dow(x) !== 0 && dow(x) !== 6); return uteis.length ? uteis : out; }
+const proxUtil = d => { let x = d; while (dow(x) === 0 || dow(x) === 6) x = addDays(1, x); return x; };
+/* horas ocupadas por dia: { 'aaaa-mm-dd': [{ nome, h, novo }] } */
+function ocupacao(fid, extras) {
+  const m = {}; const add = (ini, fim, ch, nome, novo) => { const ds = diasDe(ini, fim); if (!ds.length) return; const h = num(ch) / ds.length; ds.forEach(d => (m[d] = m[d] || []).push({ nome, h, novo })); };
+  if (fid) S.tr.filter(r => r.funcionarioId === fid).forEach(r => add(r.inicio, r.termino, r.cargaHoraria, r.norma || r.tipoNome, false));
+  (extras || []).forEach(x => add(x.inicio, x.termino, x.ch, x.nome, true));
+  return m;
+}
+function conflitos(fid, ini, fim, ch, extras) {
+  const m = ocupacao(fid, extras); const ds = diasDe(ini, fim); const h = num(ch) / (ds.length || 1); const J = jornada(); const out = [];
+  if (h > J + 0.01) out.push(`${num(ch)}h em ${ds.length} dia(s) passa de ${J}h por dia. Aumente o período.`);
+  ds.forEach(d => { const usado = (m[d] || []).reduce((a, x) => a + x.h, 0); if (usado > 0.01 && usado + h > J + 0.01) out.push(`${fmtD(d)} já tem ${(m[d] || []).map(x => x.nome).join(', ')} (${Math.round(usado * 10) / 10}h de ${J}h).`); });
+  return out;
+}
+function agendaHtml(fid, extras) {
+  const m = ocupacao(fid, extras); const J = jornada(); const ds = Object.keys(m).sort();
+  if (!ds.length) return '<div class="note">Nenhum treinamento na agenda.</div>';
+  return `<div class="tbwrap" style="margin:0"><table class="tb"><thead><tr><th>Dia</th><th>Treinamento</th><th class="n">Horas</th></tr></thead><tbody>${ds.map(d => { const L = m[d]; const tot = L.reduce((a, x) => a + x.h, 0); const over = tot > J + 0.01; return `<tr${over ? ' style="background:#fdecea"' : ''}><td>${fmtD(d)} <span class="note">${['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'][dow(d)]}</span></td><td>${L.map(x => x.novo ? `<b>${esc(x.nome)}</b>` : `<span class="note">${esc(x.nome)}</span>`).join(' + ')}</td><td class="n">${Math.round(tot * 10) / 10}h${over ? ' <span class="badge b-bad">acima</span>' : ''}</td></tr>`; }).join('')}</tbody></table></div>`;
+}
+
+/* ---------- admissão: vários treinamentos de uma vez para um funcionário ---------- */
+let PL = null;
+function ultimoTrein(fid, t) { const g = t.norma ? 'N:' + norm(t.norma) : 'T:' + t.id; return S.tr.filter(r => r.funcionarioId === fid && grupoKey(r) === g).sort((a, b) => str(b.termino).localeCompare(str(a.termino)))[0]; }
+function openPlano(fid) {
+  const f = S.func.find(x => x.id === fid); if (!f) return;
+  if (!S.tt.length) { toast('Cadastre os tipos de treinamento primeiro.', 'bad'); return openTipos(); }
+  const e = S.emp || {}; const fu = str(f.funcao);
+  const cls = t => (t.obrig || []).includes(fu) ? 'o' : (t.event || []).includes(fu) ? 'e' : 'x';
+  const tipos = S.tt.slice().sort((a, b) => ({ o: 0, e: 1, x: 2 }[cls(a)] - { o: 0, e: 1, x: 2 }[cls(b)]) || str(a.nome).localeCompare(str(b.nome), 'pt'));
+  PL = { f, rows: tipos.map(t => { const u = ultimoTrein(f.id, t); const st = u ? trState(u) : 'none'; return { t, cls: cls(t), on: cls(t) === 'o' && (!u || st === 'vencido'), inicio: '', termino: '', instr: '', iq: '', u }; }) };
+  const grp = (c, tit) => { const L = PL.rows.map((r, i) => [r, i]).filter(([r]) => r.cls === c); return L.length ? `<span class="lbl" style="margin-top:10px">${tit}</span>` + L.map(([r, i]) => `<div class="card" style="padding:10px 12px;margin:6px 0" data-pr="${i}">
+      <label style="display:flex;gap:10px;align-items:center;color:inherit;font-size:15px;margin:0"><input type="checkbox" data-pon="${i}" ${r.on ? 'checked' : ''} style="width:20px;height:20px"><span style="margin-right:auto"><b>${esc(r.t.norma || r.t.nome)}</b> <span class="note">${esc(r.t.norma ? r.t.nome.replace(r.t.norma, '').replace(/^\s*[·-]\s*/, '') : '')} · ${num(r.t.cargaHoraria)}h</span></span>${r.u ? trBadge(r.u) : ''}</label>
+      <div class="pbody" ${r.on ? '' : 'hidden'}><div class="grid2" style="margin-top:6px"><div><label>Início</label><input type="date" data-pi="${i}" value="${r.inicio}"></div><div><label>Término</label><input type="date" data-pt="${i}" value="${r.termino}"></div></div>
+      <div class="grid2"><div><label>Instrutor desta NR (se diferente)</label><input data-pin="${i}" value="${esc(r.instr)}" placeholder="Padrão: o de baixo"></div><div><label>Qualificação</label><input data-piq="${i}" value="${esc(r.iq)}"></div></div>
+      <div class="pmsg note" data-pm="${i}"></div></div></div>`).join('') : ''; };
+  openModal(mtop('Treinamentos de admissão') + `<div class="card"><b>${esc(f.nome)}</b><div class="note">${esc([f.matricula, f.funcao, f.area].filter(Boolean).join(' · '))}</div>
+    <p class="note">Marque os treinamentos, escolha as datas (ou use a distribuição automática). Um dia não recebe mais que ${jornada()}h de treinamento, contando o que ${esc(f.nome.split(' ')[0])} já tem na agenda.</p>
+    <div class="grid2"><div><label for="pl-d">Começar em</label><input type="date" id="pl-d" value="${proxUtil(addDays(1))}"></div><div style="display:flex;align-items:flex-end"><button class="btn accent" id="pl-auto" type="button" style="width:100%">Distribuir datas automaticamente</button></div></div></div>
+    <div id="pl-rows">${grp('o', 'Obrigatórios para ' + (fu || 'a função'))}${grp('e', 'Às vezes (' + (fu || 'função') + ')')}${grp('x', 'Outros treinamentos')}</div>
+    <div class="card"><span class="lbl">Instrutor, responsável técnico e TST</span>
+    <label for="pl-l">Local *</label><input id="pl-l" value="${esc(e.endereco || '')}">
+    <div class="grid2"><div><label for="pl-in">Instrutor padrão *</label><input id="pl-in"></div><div><label for="pl-iq">Qualificação *</label><input id="pl-iq" placeholder="Ex.: Eng. Eletricista · CREA 000000"></div></div>
+    <label style="display:flex;gap:8px;align-items:center;color:inherit;font-size:15px;margin-top:10px"><input type="checkbox" id="pl-same" checked> O instrutor também é o responsável técnico</label>
+    <div id="pl-rtbox" class="hidden"><div class="grid2"><div><label for="pl-rn">Responsável técnico</label><input id="pl-rn"></div><div><label for="pl-rq">Qualificação do RT</label><input id="pl-rq"></div></div></div>
+    <div class="grid2"><div><label for="pl-tn">Técnico de Segurança do Trabalho</label><input id="pl-tn" value="${esc(e.tstNome || '')}"></div><div><label for="pl-tr">Registro do TST</label><input id="pl-tr" value="${esc(e.tstRegistro || '')}"></div></div></div>
+    <div class="card"><span class="lbl">Agenda de ${esc(f.nome.split(' ')[0])} (negrito = novo)</span><div id="pl-ag"></div></div>
+    <div class="actions"><button class="btn ghost" data-close>Cancelar</button><button class="btn primary" id="pl-save">Salvar agenda</button></div>`);
+  const sel = () => PL.rows.filter(r => r.on);
+  const extras = skip => sel().filter(r => r !== skip && r.inicio && r.termino).map(r => ({ inicio: r.inicio, termino: r.termino, ch: r.t.cargaHoraria, nome: r.t.norma || r.t.nome }));
+  const check = () => {
+    let ok = true;
+    PL.rows.forEach((r, i) => { const m = $(`#sheet [data-pm="${i}"]`); if (!m) return; if (!r.on) { m.textContent = ''; return; }
+      if (!r.inicio || !r.termino) { m.textContent = 'Escolha as datas.'; m.style.color = ''; ok = false; return; }
+      if (r.termino < r.inicio) { m.textContent = 'Término antes do início.'; m.style.color = '#b3261e'; ok = false; return; }
+      const c = conflitos(f.id, r.inicio, r.termino, r.t.cargaHoraria, extras(r)); if (c.length) { m.textContent = '⚠ ' + c.join(' '); m.style.color = '#b3261e'; ok = false; } else { const n = diasDe(r.inicio, r.termino).length; m.textContent = `${n} dia(s) · ${Math.round(num(r.t.cargaHoraria) / n * 10) / 10}h por dia`; m.style.color = ''; } });
+    $('#pl-ag').innerHTML = agendaHtml(f.id, extras(null));
+    return ok;
+  };
+  const box = $('#pl-rows');
+  box.addEventListener('change', ev => { const c = ev.target.closest('[data-pon]'); if (c) { const i = +c.dataset.pon; PL.rows[i].on = c.checked; c.closest('[data-pr]').querySelector('.pbody').hidden = !c.checked; check(); } });
+  box.addEventListener('input', ev => { const t = ev.target; const i = +(t.dataset.pi || t.dataset.pt || t.dataset.pin || t.dataset.piq); if (isNaN(i)) return; const r = PL.rows[i];
+    if (t.dataset.pi != null) { r.inicio = t.value; const n = Math.max(1, Math.ceil(num(r.t.cargaHoraria) / jornada())); if (t.value) { let d = proxUtil(t.value), k = 1; while (k < n) { d = proxUtil(addDays(1, d)); k++; } r.termino = d; const te = $(`#sheet [data-pt="${i}"]`); if (te) te.value = d; } }
+    if (t.dataset.pt != null) r.termino = t.value; if (t.dataset.pin != null) r.instr = t.value; if (t.dataset.piq != null) r.iq = t.value; check(); });
+  $('#pl-same').onchange = ev => $('#pl-rtbox').classList.toggle('hidden', ev.target.checked);
+  $('#pl-auto').onclick = () => {
+    const base = proxUtil($('#pl-d').value || todayStr()); const J = jornada(); const placed = [];
+    sel().forEach(r => {
+      const ch = num(r.t.cargaHoraria) || J; const n = Math.max(1, Math.ceil(ch / J)); let d = base, tries = 0;
+      while (tries++ < 120) { let fim = d, k = 1; while (k < n) { fim = proxUtil(addDays(1, fim)); k++; }
+        if (!conflitos(f.id, d, fim, ch, placed).length) { r.inicio = d; r.termino = fim; placed.push({ inicio: d, termino: fim, ch, nome: r.t.norma || r.t.nome }); break; }
+        d = proxUtil(addDays(1, d)); }
+    });
+    PL.rows.forEach((r, i) => { const a = $(`#sheet [data-pi="${i}"]`), b = $(`#sheet [data-pt="${i}"]`); if (a) a.value = r.inicio; if (b) b.value = r.termino; });
+    check(); toast('Datas distribuídas. Confira e ajuste se precisar.', 'ok');
+  };
+  check();
+  $('#pl-save').onclick = async () => {
+    if (!guardWrite()) return;
+    const L = sel(); if (!L.length) return toast('Marque ao menos um treinamento.', 'bad');
+    if (!check()) return toast('Corrija as datas marcadas em vermelho.', 'bad');
+    const d = { local: $('#pl-l').value.trim(), instrutor: $('#pl-in').value.trim(), iq: $('#pl-iq').value.trim(), same: $('#pl-same').checked, rt: $('#pl-rn').value.trim(), rq: $('#pl-rq').value.trim(), tst: $('#pl-tn').value.trim(), tstR: $('#pl-tr').value.trim() };
+    if (!d.local) return toast('Informe o local.', 'bad');
+    if (L.some(r => !(r.instr || d.instrutor) || !(r.iq || d.iq))) return toast('Informe o instrutor e a qualificação (padrão ou de cada NR).', 'bad');
+    if (!d.same && !d.rt) return toast('Informe o responsável técnico.', 'bad');
+    if (str(f.nome).trim().split(/\s+/).length < 2) return toast('O cadastro do funcionário precisa do nome completo.', 'bad');
+    const btn = $('#pl-save'); btn.disabled = true; btn.textContent = 'Salvando…';
+    const turma = 'AD' + Date.now().toString(36).toUpperCase(); let i = 0;
+    try {
+      for (const r of L.sort((a, b) => a.inicio.localeCompare(b.inicio))) {
+        i++; const ins = r.instr || d.instrutor, iq = r.iq || d.iq;
+        await db.collection('treinamentos').doc().set({ turma, origem: 'admissao', funcionarioId: f.id, nome: str(f.nome).trim(), matricula: str(f.matricula), funcao: str(f.funcao), tipoId: r.t.id, tipoNome: str(r.t.nome), norma: str(r.t.norma), cargaHoraria: num(r.t.cargaHoraria), conteudo: str(r.t.conteudo),
+          inicio: r.inicio, termino: r.termino, validade: addMonths(r.termino, num(r.t.validadeMeses)), local: d.local, instrutor: ins, instrutorQualif: iq, rt: d.same ? ins : d.rt, rtQualif: d.same ? iq : d.rq, tst: d.tst, tstRegistro: d.tstR,
+          codigo: 'T' + r.termino.replace(/-/g, '').slice(2) + '-' + turma.slice(-4) + '-' + String(i).padStart(2, '0'), criadoEm: new Date().toISOString(), por: S.uid || '' });
+        await sleep(50);
+      }
+      closeModal(); toast(`${L.length} treinamento(s) agendado(s) para ${f.nome}.`, 'ok'); setTimeout(() => openFunc(f.id), 500);
+    } catch (er) { handleErr(er); btn.disabled = false; btn.textContent = 'Salvar agenda'; }
+  };
+}
 function openTreino(id) {
   const r = S.tr.find(x => x.id === id); if (!r) return;
   openModal(mtop('Treinamento') + `<div class="card"><dl class="kv"><dt>Participante</dt><dd><b>${esc(r.nome)}</b>${r.matricula ? ' · ' + esc(r.matricula) : ''}</dd><dt>Treinamento</dt><dd>${esc(r.tipoNome)}</dd><dt>Carga horária</dt><dd>${num(r.cargaHoraria)}h</dd>
     <dt>Período</dt><dd>${fmtD(r.inicio)} a ${fmtD(r.termino)}</dd><dt>Validade</dt><dd>${trBadge(r)}</dd><dt>Local</dt><dd>${esc(r.local)}</dd><dt>Instrutor</dt><dd>${esc(r.instrutor)} · ${esc(r.instrutorQualif)}</dd>
-    <dt>Resp. técnico</dt><dd>${esc(r.rt)} · ${esc(r.rtQualif)}</dd><dt>Certificado</dt><dd><span class="code">${esc(r.codigo)}</span></dd></dl></div>
+    <dt>Resp. técnico</dt><dd>${esc(r.rt)} · ${esc(r.rtQualif)}</dd>${r.tst ? `<dt>Téc. Segurança</dt><dd>${esc(r.tst)}${r.tstRegistro ? ' · ' + esc(r.tstRegistro) : ''}</dd>` : ''}<dt>Certificado</dt><dd><span class="code">${esc(r.codigo)}</span></dd></dl></div>
     <div class="actions"><button class="btn danger" id="tr-del">Excluir</button><button class="btn ghost" id="tr-turma">Certificados da turma (${S.tr.filter(x => x.turma === r.turma).length})</button><button class="btn primary" id="tr-cert">Certificado (PDF)</button></div>`);
   $('#tr-cert').onclick = () => gerarCertificados([r], 'certificado_' + norm(r.nome).replace(/[^a-z0-9]+/g, '_') + '_' + norm(r.norma || 'treinamento').replace(/[^a-z0-9]+/g, '_') + '.pdf');
   $('#tr-turma').onclick = () => gerarCertificados(S.tr.filter(x => x.turma === r.turma).sort((a, b) => str(a.nome).localeCompare(str(b.nome), 'pt')), 'certificados_turma_' + r.turma + '.pdf');
   armDelete($('#tr-del'), () => db.doc('treinamentos/' + r.id).delete());
 }
-async function gerarCertificados(regs, nome) {
-  toast('Gerando certificado(s)…');
-  try { await loadPDF(); } catch (_) { return toast('Sem conexão para gerar o PDF.', 'bad'); }
-  const doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape' }); const W = 297, H = 210, e = S.emp || {};
+/* desenha um certificado (frente e verso, A4 paisagem) no documento informado */
+function certInto(doc, r, novaPagina) {
+  const W = 297, H = 210, e = S.emp || {};
   const font = (sz, b, c) => { doc.setFont('helvetica', b ? 'bold' : 'normal'); doc.setFontSize(sz); doc.setTextColor.apply(doc, c || [30, 33, 40]); };
   const center = (t, y, sz, b, c) => { font(sz, b, c); doc.text(t, W / 2, y, { align: 'center' }); };
-  regs.forEach((r, i) => {
-    if (i) doc.addPage('a4', 'landscape');
-    doc.setDrawColor(20, 33, 61); doc.setLineWidth(1.2); doc.rect(10, 10, W - 20, H - 20); doc.setLineWidth(0.3); doc.rect(13, 13, W - 26, H - 26);
-    doc.setFillColor(242, 169, 0); doc.rect(13, 13, W - 26, 3, 'F');
-    center(str(e.nome) || 'Nome da empresa', 30, 12, true, [20, 33, 61]);
-    if (e.cnpj) center('CNPJ ' + e.cnpj, 36, 8.5, false, [110, 116, 128]);
-    center('CERTIFICADO', 58, 34, true, [20, 33, 61]);
-    center('Certificamos que', 74, 13, false, [60, 66, 80]);
-    center(str(r.nome).toUpperCase(), 88, 22, true, [20, 33, 61]);
-    doc.setDrawColor(242, 169, 0); doc.setLineWidth(0.6); doc.line(W / 2 - 70, 92, W / 2 + 70, 92);
-    const periodo = r.inicio === r.termino ? 'em ' + fmtD(r.termino) : 'no período de ' + fmtD(r.inicio) + ' a ' + fmtD(r.termino);
-    const frase = `${r.matricula ? 'matrícula ' + r.matricula + ', ' : ''}concluiu com aproveitamento o treinamento ${r.tipoNome}${r.norma ? ', em atendimento à ' + r.norma : ''}, com carga horária de ${num(r.cargaHoraria)} horas, realizado ${periodo}, em ${r.local}.`;
-    font(12.5, false, [40, 44, 52]); const ls = doc.splitTextToSize(frase, 220); doc.text(ls, W / 2, 104, { align: 'center', lineHeightFactor: 1.5 });
-    if (r.validade) center('Válido até ' + fmtD(r.validade) + ' (reciclagem conforme a norma)', 104 + ls.length * 6.6 + 4, 10, true, [154, 91, 0]);
-    const sigs = norm(r.rt) === norm(r.instrutor) ? [[r.nome, 'Participante'], [r.instrutor, 'Instrutor e Responsável Técnico · ' + str(r.instrutorQualif)]] : [[r.nome, 'Participante'], [r.instrutor, 'Instrutor · ' + str(r.instrutorQualif)], [r.rt, 'Responsável Técnico · ' + str(r.rtQualif)]];
-    const sw = 70, gap = sigs.length === 2 ? 40 : 14, tot = sigs.length * sw + (sigs.length - 1) * gap; let x = (W - tot) / 2;
-    sigs.forEach(([n, rol]) => { doc.setDrawColor(80); doc.setLineWidth(0.3); doc.line(x, 168, x + sw, 168); font(9, true); doc.text(doc.splitTextToSize(str(n), sw)[0], x + sw / 2, 173, { align: 'center' }); font(7.5, false, [90, 96, 110]); doc.text(doc.splitTextToSize(rol, sw).slice(0, 2), x + sw / 2, 177, { align: 'center' }); x += sw + gap; });
-    font(7.5, false, [130, 136, 146]); doc.text('Certificado nº ' + str(r.codigo) + ' · emitido em ' + fmtD(todayStr()) + ' · conteúdo programático no verso (NR-01, item 1.7)', W / 2, 192, { align: 'center' });
-    // verso
-    doc.addPage('a4', 'landscape');
-    doc.setDrawColor(20, 33, 61); doc.setLineWidth(0.3); doc.rect(13, 13, W - 26, H - 26);
-    font(14, true, [20, 33, 61]); doc.text('CONTEÚDO PROGRAMÁTICO', 22, 28);
-    font(9.5, false, [60, 66, 80]); doc.text(`${r.tipoNome} · ${num(r.cargaHoraria)}h · ${fmtD(r.inicio)}${r.inicio !== r.termino ? ' a ' + fmtD(r.termino) : ''} · ${r.local}`, 22, 35);
-    const itens = str(r.conteudo).split(/\n|;/).map(t => t.trim()).filter(Boolean); let y = 46; const colW = 120; let col = 0;
-    itens.forEach(t => { font(9.5); const l = doc.splitTextToSize(t, colW - 6); if (y + l.length * 4.6 > 172) { if (col) return; col = 1; y = 46; } const cx = 22 + col * (colW + 16); doc.text('•', cx, y); doc.text(l, cx + 4, y); y += l.length * 4.6 + 1.6; });
-    font(9, false, [60, 66, 80]); doc.text('Instrutor: ' + str(r.instrutor) + ' · ' + str(r.instrutorQualif), 22, 182); doc.text('Responsável técnico: ' + str(r.rt) + ' · ' + str(r.rtQualif), 22, 187);
-    font(7.5, false, [130, 136, 146]); doc.text('Certificado nº ' + str(r.codigo), W - 22, 192, { align: 'right' });
-  });
+  if (novaPagina) doc.addPage('a4', 'landscape');
+  doc.setDrawColor(20, 33, 61); doc.setLineWidth(1.2); doc.rect(10, 10, W - 20, H - 20); doc.setLineWidth(0.3); doc.rect(13, 13, W - 26, H - 26);
+  doc.setFillColor(242, 169, 0); doc.rect(13, 13, W - 26, 3, 'F');
+  let top = 30; const lg = logoImg();
+  if (lg) { const h = 14, w = Math.min(60, h * (num(lg.logoW) || 3) / (num(lg.logoH) || 1)), hh = w * (num(lg.logoH) || 1) / (num(lg.logoW) || 3); try { doc.addImage(lg.logo, /jpeg/.test(lg.logo.slice(0, 20)) ? 'JPEG' : 'PNG', W / 2 - w / 2, 20, w, hh); top = 20 + hh + 6; } catch (_) {} }
+  center(str(e.nome) || 'Nome da empresa', top, 12, true, [20, 33, 61]);
+  if (e.cnpj) center('CNPJ ' + e.cnpj, top + 5.5, 8.5, false, [110, 116, 128]);
+  const y0 = Math.max(58, top + 20);
+  center('CERTIFICADO', y0, 34, true, [20, 33, 61]);
+  center('Certificamos que', y0 + 15, 13, false, [60, 66, 80]);
+  center(str(r.nome).toUpperCase(), y0 + 29, 22, true, [20, 33, 61]);
+  doc.setDrawColor(242, 169, 0); doc.setLineWidth(0.6); doc.line(W / 2 - 70, y0 + 33, W / 2 + 70, y0 + 33);
+  const periodo = r.inicio === r.termino ? 'em ' + fmtD(r.termino) : 'no período de ' + fmtD(r.inicio) + ' a ' + fmtD(r.termino);
+  const frase = `${r.matricula ? 'matrícula ' + r.matricula + ', ' : ''}concluiu com aproveitamento o treinamento ${r.tipoNome}${r.norma ? ', em atendimento à ' + r.norma : ''}, com carga horária de ${num(r.cargaHoraria)} horas, realizado ${periodo}, em ${r.local}.`;
+  font(12.5, false, [40, 44, 52]); const ls = doc.splitTextToSize(frase, 220); doc.text(ls, W / 2, y0 + 45, { align: 'center', lineHeightFactor: 1.5 });
+  if (r.validade) center('Válido até ' + fmtD(r.validade) + ' (reciclagem conforme a norma)', y0 + 45 + ls.length * 6.6 + 4, 10, true, [154, 91, 0]);
+  const sigs = [[r.nome, 'Participante']];
+  if (norm(r.rt) === norm(r.instrutor)) sigs.push([r.instrutor, 'Instrutor e Responsável Técnico · ' + str(r.instrutorQualif)]);
+  else { sigs.push([r.instrutor, 'Instrutor · ' + str(r.instrutorQualif)]); sigs.push([r.rt, 'Responsável Técnico · ' + str(r.rtQualif)]); }
+  if (r.tst && norm(r.tst) !== norm(r.instrutor) && norm(r.tst) !== norm(r.rt)) sigs.push([r.tst, 'Técnico de Segurança do Trabalho' + (r.tstRegistro ? ' · ' + r.tstRegistro : '')]);
+  const n = sigs.length, sw = n >= 4 ? 58 : 70, gap = n === 2 ? 40 : n === 3 ? 14 : 8, tot = n * sw + (n - 1) * gap; let x = (W - tot) / 2;
+  sigs.forEach(([nm, rol]) => { doc.setDrawColor(80); doc.setLineWidth(0.3); doc.line(x, 168, x + sw, 168); font(9, true); doc.text(doc.splitTextToSize(str(nm), sw)[0], x + sw / 2, 173, { align: 'center' }); font(7.5, false, [90, 96, 110]); doc.text(doc.splitTextToSize(rol, sw).slice(0, 2), x + sw / 2, 177, { align: 'center' }); x += sw + gap; });
+  font(7.5, false, [130, 136, 146]); doc.text('Certificado nº ' + str(r.codigo) + ' · emitido em ' + fmtD(todayStr()) + ' · conteúdo programático no verso (NR-01, item 1.7)', W / 2, 192, { align: 'center' });
+  doc.addPage('a4', 'landscape');
+  doc.setDrawColor(20, 33, 61); doc.setLineWidth(0.3); doc.rect(13, 13, W - 26, H - 26);
+  font(14, true, [20, 33, 61]); doc.text('CONTEÚDO PROGRAMÁTICO', 22, 28);
+  font(9.5, false, [60, 66, 80]); doc.text(doc.splitTextToSize(`${r.tipoNome} · ${num(r.cargaHoraria)}h · ${fmtD(r.inicio)}${r.inicio !== r.termino ? ' a ' + fmtD(r.termino) : ''} · ${r.local}`, W - 44)[0], 22, 35);
+  const itens = str(r.conteudo).split(/\n|;/).map(t => t.trim()).filter(Boolean); let y = 46; const colW = 120; let col = 0;
+  itens.forEach(t => { font(9.5); const l = doc.splitTextToSize(t, colW - 6); if (y + l.length * 4.6 > 168) { if (col) return; col = 1; y = 46; } const cx = 22 + col * (colW + 16); doc.text('•', cx, y); doc.text(l, cx + 4, y); y += l.length * 4.6 + 1.6; });
+  font(9, false, [60, 66, 80]); let fy = r.tst ? 177 : 182;
+  doc.text('Instrutor: ' + str(r.instrutor) + ' · ' + str(r.instrutorQualif), 22, fy); fy += 5;
+  doc.text('Responsável técnico: ' + str(r.rt) + ' · ' + str(r.rtQualif), 22, fy); fy += 5;
+  if (r.tst) doc.text('Técnico de Segurança do Trabalho: ' + str(r.tst) + (r.tstRegistro ? ' · ' + r.tstRegistro : ''), 22, fy);
+  font(7.5, false, [130, 136, 146]); doc.text('Certificado nº ' + str(r.codigo), W - 22, 192, { align: 'right' });
+}
+async function gerarCertificados(regs, nome) {
+  if (regs.some(r => str(r.termino) > todayStr())) { toast('Há treinamento ainda não concluído (término no futuro). O certificado só deve ser emitido após a conclusão.', 'bad'); await sleep(2600); }
+  toast('Gerando certificado(s)…');
+  try { await loadPDF(); } catch (_) { return toast('Sem conexão para gerar o PDF.', 'bad'); }
+  const doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape' });
+  regs.forEach((r, i) => certInto(doc, r, i > 0));
   const dl = await use('downloads'); if (!dl) return toast('Download indisponível neste aparelho.', 'bad');
   try { await dl.save({ filename: nome, data: doc.output('blob') }); toast(`PDF com ${regs.length} certificado(s) pronto.`, 'ok'); } catch (er) { if (!(er && er.code === 'declined')) toast('Não foi possível salvar o PDF.', 'bad'); }
 }
@@ -1896,7 +2093,7 @@ async function gerarLista(d, parts) {
   const cols = [['Nº', 10], ['Nome completo', 78], ['Matrícula', 22], ['Função', 30], ['Assinatura', 40]];
   P.need(8); doc.setFillColor(20, 33, 61); doc.rect(P.L, P.y, P.W, 6.5, 'F'); P.font(8, true, [255, 255, 255]); let x = P.L; cols.forEach(([t, w]) => { doc.text(t, x + 1.5, P.y + 4.4); x += w; }); P.y += 6.5;
   parts.forEach((p, i) => { P.need(11); x = P.L; [String(i + 1), p.nome, p.matricula, p.funcao].forEach((v, j) => { P.font(8.5); doc.text(doc.splitTextToSize(str(v), cols[j][1] - 3)[0] || '', x + 1.5, P.y + 6.5); x += cols[j][1]; }); doc.setDrawColor(200); doc.setLineWidth(0.15); doc.line(P.L, P.y + 10, P.R, P.y + 10); P.y += 10; });
-  P.sign(['Instrutor · ' + d.instrutor, 'Responsável técnico · ' + d.rt]);
+  P.sign(['Instrutor · ' + d.instrutor, 'Responsável técnico · ' + d.rt].concat(d.tst && norm(d.tst) !== norm(d.instrutor) && norm(d.tst) !== norm(d.rt) ? ['Técnico de Segurança · ' + d.tst] : []));
   P.footer('Gerado em ' + fmtDT(new Date().toISOString()));
   await salvarPDF(P, 'lista_presenca_' + norm(d.t.norma || d.t.nome).replace(/[^a-z0-9]+/g, '_') + '_' + d.inicio + '.pdf', 1);
 }
@@ -1910,7 +2107,7 @@ const PAPEIS = {
   tst: ['TST', 'Entrega de EPI, kits e OS, treinamentos, fichas, relatórios; consulta regras', 'Colaborador'],
   rh: ['RH', 'Funcionários, admissão (ficha + OS), treinamentos e relatórios', 'Colaborador']
 };
-const SUBS = ['ferramentas', 'epis', 'funcionarios', 'kits', 'regras', 'trein', 'usuarios'];
+const SUBS = ['ferramentas', 'epis', 'funcionarios', 'kits', 'regras', 'trein', 'usuarios', 'empresa'];
 const ACESSO = {
   admin: { views: '*', subs: '*' },
   gerente: { views: '*', subs: ['ferramentas', 'epis', 'funcionarios', 'kits', 'regras', 'trein'] },
@@ -1937,7 +2134,7 @@ function aplicarPapel() {
   const ban = $('#papel-banner');
   if (pp === 'none') { pedirAcesso(); ban.classList.remove('hidden'); ban.textContent = 'Seu acesso ainda não foi liberado. O administrador precisa definir seu perfil em Cadastros → Usuários.'; }
   else ban.classList.add('hidden');
-  $('#c-emp').classList.toggle('hidden', pp !== 'admin'); $('#c-demo').classList.toggle('hidden', pp !== 'admin');
+  $('#c-demo').classList.toggle('hidden', pp !== 'admin');
 }
 let pedidoFeito = false;
 async function pedirAcesso() {
