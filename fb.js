@@ -3,7 +3,7 @@
 import { FIREBASE_CONFIG } from './firebase-config.js';
 import { initializeApp, deleteApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, createUserWithEmailAndPassword, setPersistence, browserLocalPersistence } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
-import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, limit, writeBatch, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, getDoc, getDocs, getDocFromServer, getDocFromCache, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, limit, writeBatch, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
 const app = initializeApp(FIREBASE_CONFIG);
 const auth = getAuth(app);
@@ -152,15 +152,23 @@ const reenviarConvite = email => sendPasswordResetEmail(auth, email);
 const atualizarUsuario = (uid, d) => updateDoc(doc(fs, 'usuarios/' + uid), d);
 
 /* ---------- inicialização ---------- */
+/* leitura robusta: servidor com prazo, depois cache local (evita travar na abertura com várias abas) */
+const tempo = (p, ms) => Promise.race([p, new Promise((_, j) => setTimeout(() => j(new Error('timeout')), ms))]);
+async function lerDoc(caminho) {
+  const r = doc(fs, caminho);
+  if (navigator.onLine) { try { return await tempo(getDocFromServer(r), 6000); } catch (_) {} }
+  try { return await tempo(getDocFromCache(r), 3000); } catch (_) {}
+  try { return await tempo(getDoc(r), 4000); } catch (_) { return null; }
+}
 let resolveReady; const ready = new Promise(r => resolveReady = r);
 window.__fbUse = name => ready.then(() => ({ db: DB, user: USER, downloads: DOWNLOADS })[name] || null);
 onAuthStateChanged(auth, async u => {
   if (!u) {
-    let setup = null; try { setup = await getDoc(doc(fs, 'config/setup')); } catch (_) {}
+    const setup = await lerDoc('config/setup');
     return (setup && setup.exists()) || !navigator.onLine ? telaLogin() : telaSetup();
   }
-  let perf = null;
-  try { perf = await getDoc(doc(fs, 'usuarios/' + u.uid)); } catch (_) {}
+  const perf = await lerDoc('usuarios/' + u.uid);
+  if (!perf) return telaErro();
   const d = perf && perf.exists() ? perf.data() : null;
   if (!d || d.ativo === false) return telaSemAcesso(u);
   ME = { uid: u.uid, email: u.email, nome: d.nome || u.email, papel: d.papel };
@@ -169,6 +177,11 @@ onAuthStateChanged(auth, async u => {
   const um = document.getElementById('usermenu'); if (um) { um.hidden = false; um.querySelector('b').textContent = ME.nome.split(' ')[0]; um.onclick = () => { if (confirmSair()) window.__FB.sair(); }; }
   hideGate(); resolveReady();
 });
+function telaErro() {
+  showGate(`<h1>Não foi possível carregar</h1><p class="gsub">Verifique a internet e tente de novo.</p>
+    <button class="btn primary big" id="g-retry" type="button" style="margin-top:14px">Tentar de novo</button>`);
+  document.getElementById('g-retry').onclick = () => location.reload();
+}
 function confirmSair() { const b = document.getElementById('usermenu'); if (b.dataset.armed) return true; b.dataset.armed = '1'; b.querySelector('span').textContent = 'Tocar de novo para sair'; setTimeout(() => { delete b.dataset.armed; b.querySelector('span').textContent = 'Sair'; }, 3000); return false; }
 
 /* ---------- app instalável ---------- */
