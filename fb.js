@@ -3,11 +3,11 @@
 import { FIREBASE_CONFIG } from './firebase-config.js';
 import { initializeApp, deleteApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, createUserWithEmailAndPassword, setPersistence, browserLocalPersistence } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
-import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, getDoc, getDocs, getDocFromServer, getDocFromCache, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, limit, writeBatch, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { initializeFirestore, persistentLocalCache, persistentSingleTabManager, collection, doc, getDoc, getDocs, getDocFromServer, getDocFromCache, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, limit, writeBatch, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
 const app = initializeApp(FIREBASE_CONFIG);
 const auth = getAuth(app);
-const fs = initializeFirestore(app, { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) });
+const fs = initializeFirestore(app, { localCache: persistentLocalCache({ tabManager: persistentSingleTabManager({ forceOwnership: true }) }) });
 setPersistence(auth, browserLocalPersistence).catch(() => {});
 
 /* ---------- tela de login / configuração inicial ---------- */
@@ -156,20 +156,23 @@ const atualizarUsuario = (uid, d) => updateDoc(doc(fs, 'usuarios/' + uid), d);
 const tempo = (p, ms) => Promise.race([p, new Promise((_, j) => setTimeout(() => j(new Error('timeout')), ms))]);
 async function lerDoc(caminho) {
   const r = doc(fs, caminho);
-  if (navigator.onLine) { try { return await tempo(getDocFromServer(r), 6000); } catch (_) {} }
-  try { return await tempo(getDocFromCache(r), 3000); } catch (_) {}
-  try { return await tempo(getDoc(r), 4000); } catch (_) { return null; }
+  for (const ms of [6000, 10000]) {
+    if (!navigator.onLine) break;
+    try { const d = await tempo(getDocFromServer(r), ms); d.__srv = true; return d; } catch (e) { if (e && e.code === 'permission-denied') return null; }
+  }
+  try { return await tempo(getDocFromCache(r), 3000); } catch (_) { return null; }
 }
 let resolveReady; const ready = new Promise(r => resolveReady = r);
 window.__fbUse = name => ready.then(() => ({ db: DB, user: USER, downloads: DOWNLOADS })[name] || null);
 onAuthStateChanged(auth, async u => {
   if (!u) {
     const setup = await lerDoc('config/setup');
-    return (setup && setup.exists()) || !navigator.onLine ? telaLogin() : telaSetup();
+    return (setup && setup.__srv && !setup.exists()) ? telaSetup() : telaLogin();
   }
   const perf = await lerDoc('usuarios/' + u.uid);
   if (!perf) return telaErro();
-  const d = perf && perf.exists() ? perf.data() : null;
+  const d = perf.exists() ? perf.data() : null;
+  if (!d && !perf.__srv) return telaErro();
   if (!d || d.ativo === false) return telaSemAcesso(u);
   ME = { uid: u.uid, email: u.email, nome: d.nome || u.email, papel: d.papel };
   window.__FB = { papel: d.papel, uid: u.uid, nome: ME.nome, email: u.email, criarUsuario, reenviarConvite, atualizarUsuario, users: () => USERS, sair: () => signOut(auth).then(() => location.reload()) };
