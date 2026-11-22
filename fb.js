@@ -1,0 +1,175 @@
+/* Camada Firebase: login, perfis, banco (Firestore offline) e downloads.
+   Expõe para o app a mesma interface que ele já usava: claude.use('db' | 'user' | 'downloads'). */
+import { FIREBASE_CONFIG } from './firebase-config.js';
+import { initializeApp, deleteApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, createUserWithEmailAndPassword, setPersistence, browserLocalPersistence } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, limit, writeBatch, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+
+const app = initializeApp(FIREBASE_CONFIG);
+const auth = getAuth(app);
+const fs = initializeFirestore(app, { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) });
+setPersistence(auth, browserLocalPersistence).catch(() => {});
+
+/* ---------- tela de login / configuração inicial ---------- */
+const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const gate = document.getElementById('gate');
+function showGate(html) { gate.innerHTML = `<div class="gbox"><div class="glogo">${document.querySelector('.logo').innerHTML}</div>${html}</div>`; gate.hidden = false; }
+function hideGate() { gate.hidden = true; gate.innerHTML = ''; }
+const msg = (t, bad) => { const m = gate.querySelector('.gmsg'); if (m) { m.textContent = t; m.className = 'gmsg' + (bad ? ' bad' : ''); } };
+const errPt = e => ({
+  'auth/invalid-credential': 'E-mail ou senha incorretos.', 'auth/wrong-password': 'E-mail ou senha incorretos.', 'auth/user-not-found': 'E-mail ou senha incorretos.',
+  'auth/invalid-email': 'E-mail inválido.', 'auth/too-many-requests': 'Muitas tentativas. Aguarde alguns minutos.', 'auth/network-request-failed': 'Sem internet. O primeiro login precisa de conexão.',
+  'auth/email-already-in-use': 'Este e-mail já tem conta.', 'auth/weak-password': 'Senha fraca: use pelo menos 8 caracteres.', 'auth/user-disabled': 'Usuário desativado.'
+}[e && e.code] || ('Erro: ' + ((e && e.message) || e)));
+
+function telaLogin() {
+  showGate(`<h1>Ferramentas &amp; EPI</h1><p class="gsub">Entre com seu e-mail e senha</p>
+    <form id="g-form"><label>E-mail</label><input id="g-email" type="email" autocomplete="username" required>
+    <label>Senha</label><input id="g-pass" type="password" autocomplete="current-password" required>
+    <button class="btn primary big" type="submit" style="margin-top:14px">Entrar</button></form>
+    <button class="link" id="g-forgot" type="button" style="margin-top:10px">Esqueci minha senha / primeiro acesso</button>
+    <p class="gmsg"></p>`);
+  gate.querySelector('#g-form').onsubmit = async e => { e.preventDefault(); msg('Entrando…'); try { await signInWithEmailAndPassword(auth, gate.querySelector('#g-email').value.trim(), gate.querySelector('#g-pass').value); } catch (er) { msg(errPt(er), true); } };
+  gate.querySelector('#g-forgot').onclick = async () => { const em = gate.querySelector('#g-email').value.trim(); if (!em) return msg('Digite seu e-mail acima e toque de novo.', true); try { await sendPasswordResetEmail(auth, em); msg('Se o e-mail estiver cadastrado, você vai receber um link para criar ou trocar a senha. Confira também o spam.'); } catch (er) { msg(errPt(er), true); } };
+}
+function telaSetup() {
+  showGate(`<h1>Configuração inicial</h1><p class="gsub">Crie a conta do primeiro administrador. Isso só aparece uma vez.</p>
+    <form id="g-form"><label>Nome completo</label><input id="g-nome" required>
+    <label>E-mail</label><input id="g-email" type="email" autocomplete="username" required>
+    <label>Senha (mínimo 8 caracteres)</label><input id="g-pass" type="password" autocomplete="new-password" minlength="8" required>
+    <button class="btn primary big" type="submit" style="margin-top:14px">Criar administrador</button></form><p class="gmsg"></p>`);
+  gate.querySelector('#g-form').onsubmit = async e => {
+    e.preventDefault(); msg('Criando…');
+    const nome = gate.querySelector('#g-nome').value.trim(), email = gate.querySelector('#g-email').value.trim(), pass = gate.querySelector('#g-pass').value;
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, email, pass);
+      const b = writeBatch(fs);
+      b.set(doc(fs, 'config/setup'), { adminUid: cred.user.uid, em: new Date().toISOString() });
+      b.set(doc(fs, 'usuarios/' + cred.user.uid), { nome, email, papel: 'admin', ativo: true, criadoEm: new Date().toISOString() });
+      await b.commit();
+      location.reload();
+    } catch (er) { msg(errPt(er), true); }
+  };
+}
+function telaSemAcesso(u) {
+  showGate(`<h1>Acesso não liberado</h1><p class="gsub">A conta <b>${esc(u.email)}</b> está desativada ou ainda não tem perfil. Fale com o administrador.</p>
+    <button class="btn ghost big" id="g-out" type="button">Sair</button>`);
+  gate.querySelector('#g-out').onclick = () => signOut(auth).then(() => location.reload());
+}
+
+/* ---------- banco: mesma interface do app ---------- */
+const pend = { n: 0 };
+const mapErr = e => ({ code: ({ 'permission-denied': 'invalid_argument', 'invalid-argument': 'invalid_argument', 'not-found': 'invalid_argument', 'resource-exhausted': 'resource_exhausted', 'unavailable': 'unavailable', 'unauthenticated': 'revoked' })[e && e.code] || 'unavailable', message: (e && e.message) || String(e) });
+/* gravação: grava no celular na hora; se estiver sem internet, não trava a tela esperando o servidor */
+function write(p) {
+  pend.n++; updConn();
+  const done = p.then(() => { pend.n--; updConn(); }, e => { pend.n--; updConn(); throw mapErr(e); });
+  return Promise.race([done, new Promise(r => setTimeout(r, navigator.onLine ? 8000 : 400))]);
+}
+const wDoc = s => ({ id: s.id, exists: s.exists(), data: () => s.data(), metadata: { fromCache: s.metadata.fromCache, hasPendingWrites: s.metadata.hasPendingWrites } });
+const wQuery = s => { const docs = s.docs.map(wDoc); return { docs, size: docs.length, empty: !docs.length, metadata: { fromCache: s.metadata.fromCache, hasPendingWrites: s.metadata.hasPendingWrites }, docChanges: () => [] }; };
+function docRef(path) {
+  const r = doc(fs, path);
+  return {
+    id: r.id, path,
+    get: () => getDoc(r).then(wDoc, e => { throw mapErr(e); }),
+    set: d => write(setDoc(r, d)),
+    update: d => write(updateDoc(r, d)),
+    delete: () => write(deleteDoc(r)),
+    onSnapshot: (next, err) => onSnapshot(r, s => next(wDoc(s)), e => err && err(mapErr(e))),
+    collection: sub => collRef(path + '/' + sub)
+  };
+}
+function collRef(path, cons) {
+  cons = cons || [];
+  const c = collection(fs, path); const q = () => cons.length ? query(c, ...cons) : c;
+  return {
+    path,
+    where: (f, op, v) => collRef(path, cons.concat(where(f, op, v))),
+    orderBy: (f, d) => collRef(path, cons.concat(orderBy(f, d || 'asc'))),
+    limit: n => collRef(path, cons.concat(limit(n))),
+    get: () => getDocs(q()).then(wQuery, e => { throw mapErr(e); }),
+    onSnapshot: (next, err) => onSnapshot(q(), s => next(wQuery(s)), e => err && err(mapErr(e))),
+    doc: id => docRef(id ? path + '/' + id : doc(c).path),
+    add: async d => { const r = docRef(doc(c).path); await r.set(d); return r; }
+  };
+}
+const DB = { doc: docRef, collection: p => collRef(p) };
+
+/* ---------- conexão / pendências ---------- */
+function updConn() {
+  const c = document.getElementById('conn'); if (!c) return;
+  if (!navigator.onLine) { c.textContent = 'Offline' + (pend.n ? ` · ${pend.n} a enviar` : ' · salvando no aparelho'); c.className = 'conn warn'; }
+  else if (pend.n) { c.textContent = `Enviando ${pend.n}…`; c.className = 'conn warn'; }
+  else if (c.textContent.startsWith('Offline') || c.textContent.startsWith('Enviando')) { c.textContent = 'Online'; c.className = 'conn ok'; }
+}
+addEventListener('online', updConn); addEventListener('offline', updConn); setInterval(updConn, 3000);
+
+/* ---------- usuários / perfis ---------- */
+let ME = null; let USERS = {};
+const PAPEIS_EDIT = ['admin', 'gerente'];
+function profileOf(id) { const u = USERS[id]; return { id, name: (u && u.nome) || '', avatarUrl: '', color: '#2a78d6', email: (u && u.email) || null, isMe: ME && id === ME.uid, guest: false }; }
+const USER = {
+  id: async () => ME && ME.uid,
+  me: async () => ({ id: ME.uid, name: ME.nome, email: ME.email, avatarUrl: '', color: '#2a78d6', isOwner: ME.papel === 'admin', canEdit: PAPEIS_EDIT.includes(ME.papel) }),
+  isOwner: async () => !!ME && ME.papel === 'admin',
+  canEdit: async () => !!ME && PAPEIS_EDIT.includes(ME.papel),
+  can: async n => n === 'data.write' ? !!ME : false,
+  profiles: async ids => { const out = {}; [].concat(ids).forEach(id => out[id] = profileOf(id)); return out; },
+  search: async q => { q = String(q || '').toLowerCase(); return Object.keys(USERS).filter(id => !q || (USERS[id].nome + ' ' + USERS[id].email).toLowerCase().includes(q)).slice(0, 8).map(profileOf); },
+  name: async () => ME && ME.nome
+};
+
+/* ---------- downloads ---------- */
+const DOWNLOADS = {
+  save: async ({ filename, data }) => {
+    const blob = data instanceof Blob ? data : new Blob([data], { type: /\.csv$/i.test(filename) ? 'text/csv' : /\.pdf$/i.test(filename) ? 'application/pdf' : 'application/octet-stream' });
+    const file = new File([blob], filename, { type: blob.type });
+    if (navigator.canShare && /Android|iPhone|iPad/i.test(navigator.userAgent) && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: filename }); return { status: 'saved' }; } catch (e) { if (e && e.name === 'AbortError') throw { code: 'declined' }; }
+    }
+    const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 30000);
+    return { status: 'saved' };
+  }
+};
+
+/* ---------- administração de usuários (usado pela tela Cadastros → Usuários) ---------- */
+async function criarUsuario({ nome, email, papel }) {
+  const tmp = initializeApp(FIREBASE_CONFIG, 'cadastro-' + Date.now());
+  try {
+    const a2 = getAuth(tmp);
+    const senhaTemp = crypto.getRandomValues(new Uint32Array(4)).join('-') + 'Aa!';
+    let uid;
+    try { uid = (await createUserWithEmailAndPassword(a2, email, senhaTemp)).user.uid; }
+    catch (e) { if (e && e.code === 'auth/email-already-in-use') throw { message: 'Este e-mail já tem conta. Se a pessoa foi desativada, reative na lista.' }; throw { message: errPt(e) }; }
+    await signOut(a2);
+    await setDoc(doc(fs, 'usuarios/' + uid), { nome, email, papel, ativo: true, criadoEm: new Date().toISOString(), por: ME.uid });
+    await sendPasswordResetEmail(auth, email);
+    return uid;
+  } finally { deleteApp(tmp).catch(() => {}); }
+}
+const reenviarConvite = email => sendPasswordResetEmail(auth, email);
+const atualizarUsuario = (uid, d) => updateDoc(doc(fs, 'usuarios/' + uid), d);
+
+/* ---------- inicialização ---------- */
+let resolveReady; const ready = new Promise(r => resolveReady = r);
+window.__fbUse = name => ready.then(() => ({ db: DB, user: USER, downloads: DOWNLOADS })[name] || null);
+onAuthStateChanged(auth, async u => {
+  if (!u) {
+    let setup = null; try { setup = await getDoc(doc(fs, 'config/setup')); } catch (_) {}
+    return (setup && setup.exists()) || !navigator.onLine ? telaLogin() : telaSetup();
+  }
+  let perf = null;
+  try { perf = await getDoc(doc(fs, 'usuarios/' + u.uid)); } catch (_) {}
+  const d = perf && perf.exists() ? perf.data() : null;
+  if (!d || d.ativo === false) return telaSemAcesso(u);
+  ME = { uid: u.uid, email: u.email, nome: d.nome || u.email, papel: d.papel };
+  window.__FB = { papel: d.papel, uid: u.uid, nome: ME.nome, email: u.email, criarUsuario, reenviarConvite, atualizarUsuario, users: () => USERS, sair: () => signOut(auth).then(() => location.reload()) };
+  onSnapshot(collection(fs, 'usuarios'), s => { USERS = {}; s.docs.forEach(x => USERS[x.id] = x.data()); const m = USERS[u.uid]; if (m && (m.ativo === false || m.papel !== window.__FB.papel)) location.reload(); window.dispatchEvent(new Event('fb-users')); }, () => {});
+  const um = document.getElementById('usermenu'); if (um) { um.hidden = false; um.querySelector('b').textContent = ME.nome.split(' ')[0]; um.onclick = () => { if (confirmSair()) window.__FB.sair(); }; }
+  hideGate(); resolveReady();
+});
+function confirmSair() { const b = document.getElementById('usermenu'); if (b.dataset.armed) return true; b.dataset.armed = '1'; b.querySelector('span').textContent = 'Tocar de novo para sair'; setTimeout(() => { delete b.dataset.armed; b.querySelector('span').textContent = 'Sair'; }, 3000); return false; }
+
+/* ---------- app instalável ---------- */
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
