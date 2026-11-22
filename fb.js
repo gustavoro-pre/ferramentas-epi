@@ -89,7 +89,7 @@ function collRef(path, cons) {
     orderBy: (f, d) => collRef(path, cons.concat(orderBy(f, d || 'asc'))),
     limit: n => collRef(path, cons.concat(limit(n))),
     get: () => getDocs(q()).then(wQuery, e => { throw mapErr(e); }),
-    onSnapshot: (next, err) => onSnapshot(q(), s => next(wQuery(s)), e => err && err(mapErr(e))),
+    onSnapshot: (next, err) => onSnapshot(q(), { includeMetadataChanges: true }, s => next(wQuery(s)), e => err && err(mapErr(e))),
     doc: id => docRef(id ? path + '/' + id : doc(c).path),
     add: async d => { const r = docRef(doc(c).path); await r.set(d); return r; }
   };
