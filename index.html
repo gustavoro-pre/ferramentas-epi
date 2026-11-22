@@ -239,6 +239,7 @@ table.tb{width:100%;border-collapse:collapse;font-size:13px}
 <!-- EPI -->
 <section id="v-epi" class="view" hidden>
   <h2>Entrega de EPI</h2>
+  <div class="card" id="e-estcard" hidden><label for="e-est" style="margin-top:0">Sai do estoque</label><select id="e-est"></select></div>
   <div class="card">
     <span class="lbl">1. Funcionário</span>
     <div id="e-func-sel"></div>
@@ -278,11 +279,11 @@ table.tb{width:100%;border-collapse:collapse;font-size:13px}
 <!-- CADASTROS -->
 <section id="v-cadastros" class="view" hidden>
   <div class="seg" id="c-seg">
-    <button data-sub="ferramentas" class="on">Ferramentas</button><button data-sub="epis">EPIs</button><button data-sub="funcionarios">Funcionários</button><button data-sub="kits">Kits</button><button data-sub="regras">Regras</button><button data-sub="trein">Treinamentos</button><button data-sub="empresa">Empresa</button><button data-sub="usuarios">Usuários</button>
+    <button data-sub="ferramentas" class="on">Ferramentas</button><button data-sub="epis">EPIs</button><button data-sub="funcionarios">Funcionários</button><button data-sub="kits">Kits</button><button data-sub="regras">Regras</button><button data-sub="trein">Treinamentos</button><button data-sub="estoques">Estoques</button><button data-sub="empresa">Empresa</button><button data-sub="usuarios">Usuários</button>
   </div>
   <div id="sub-ferramentas" class="sub">
     <div class="head"><h2>Ferramentas</h2><button class="btn ghost" id="f-qr" type="button">Etiquetas QR</button><button class="btn ghost" id="f-imp" type="button">Importar lista</button><button class="btn ghost" data-xml type="button">Importar XML (NF-e)</button><button class="btn primary" id="f-new" type="button">+ Nova</button></div>
-    <input id="f-q" placeholder="Buscar código, descrição, categoria, nº de série" autocomplete="off">
+    <div class="grid2" style="grid-template-columns:2fr 1fr"><input id="f-q" placeholder="Buscar código, descrição, categoria, nº de série" autocomplete="off"><select id="f-est" aria-label="Estoque"></select></div>
     <div class="chips" id="f-chips"></div>
     <div id="f-list" class="list"></div>
   </div>
@@ -316,6 +317,11 @@ table.tb{width:100%;border-collapse:collapse;font-size:13px}
     <div class="head"><h2>Kits padrão</h2><button class="btn primary" id="k-new" type="button">+ Novo kit</button></div>
     <p class="note" style="margin-top:0">Um kit por função define os EPIs obrigatórios (com troca periódica) e as ferramentas que vão na cautela.</p>
     <div id="k-list" class="list"></div>
+  </div>
+  <div id="sub-estoques" class="sub" hidden>
+    <div class="head"><h2>Estoques</h2><button class="btn ghost" id="es-tr" type="button">Transferir</button><button class="btn primary" id="es-new" type="button">+ Novo estoque</button></div>
+    <p class="note" style="margin-top:0">O Estoque geral recebe as notas fiscais. Transfira dele para os estoques avançados; cada entrega baixa do estoque escolhido.</p>
+    <div id="es-list" class="list"></div>
   </div>
   <div id="sub-empresa" class="sub" hidden>
     <div class="head"><h2>Dados da empresa</h2></div>
@@ -407,11 +413,11 @@ const pend = c => (Array.isArray(c.itens) ? c.itens : []).filter(i => i && !i.de
 const isLate = c => c.status === 'aberta' && str(c.previsaoDevolucao) && str(c.previsaoDevolucao) < todayStr();
 
 /* ================= estado ================= */
-const S = { ferr: [], func: [], epis: [], kits: [], caut: [], ent: [], ready: { ferr:false, func:false, epis:false, kits:false, caut:false, ent:false }, canWrite: true, uid: null, emp: {}, regras: { epi: {}, tipos: {} }, sol: [], dec: [], canEdit: false, tt: [], tr: [], isOwner: false, usuarios: {}, ped: [] };
+const S = { est: [], transf: [], ferr: [], func: [], epis: [], kits: [], caut: [], ent: [], ready: { ferr:false, func:false, epis:false, kits:false, caut:false, ent:false }, canWrite: true, uid: null, emp: {}, regras: { epi: {}, tipos: {} }, sol: [], dec: [], canEdit: false, tt: [], tr: [], isOwner: false, usuarios: {}, ped: [] };
 const abertas = () => S.caut.filter(c => c.status === 'aberta');
 let db = null, user = null;
 const R = { func: null, itens: [] };
-const E = { func: null, itens: [] };
+const E = { func: null, itens: [], est: null };
 let fFilter = 'todas', uFilter = 'ativos', sub = 'ferramentas';
 const allReady = () => Object.values(S.ready).every(Boolean);
 
@@ -573,14 +579,15 @@ function ferrRow(f) {
   return `<button class="item" data-ferr="${esc(f.id)}"><div class="main">
     <div class="t1"><span class="code">${esc(f.codigo)}</span> ${esc(f.descricao)}</div>
     <div class="t2">${[f.categoria, f.marcaModelo, f.numSerie ? 'S/N ' + f.numSerie : '', num(f.valor) ? brl(f.valor) : ''].filter(Boolean).map(esc).join(' · ') || '&nbsp;'}</div>
-    ${f.status === 'emprestada' && f.comQuem ? `<div class="t2">Com: <b>${esc(f.comQuem)}</b></div>` : ''}</div>
+    ${f.status === 'emprestada' && f.comQuem ? `<div class="t2">Com: <b>${esc(f.comQuem)}</b></div>` : ''}${f.estoqueId ? `<div class="t2">📍 ${esc(estNome(f.estoqueId))}</div>` : ''}</div>
     <div class="side">${badge(f.status)}${calibBadge(f)}</div></button>`;
 }
 function epiRow(p) {
   const low = num(p.estoqueMin) > 0 && num(p.estoque) < num(p.estoqueMin);
   return `<button class="item" data-epi="${esc(p.id)}"><div class="main"><div class="t1">${esc(p.nome)}</div>
-    <div class="t2">CA ${esc(p.ca || '—')} · ${esc(p.categoria || '')}${num(p.vidaUtilDias) ? ' · troca a cada ' + num(p.vidaUtilDias) + ' dias' : ''} · ${brl(p.custo)}</div></div>
-    <div class="side"><span class="badge ${low ? 'b-warn' : 'b-mut'}">Estoque ${num(p.estoque)}${num(p.estoqueMin) ? ' / mín ' + num(p.estoqueMin) : ''}</span>${caBadge(p)}</div></button>`;
+    <div class="t2">CA ${esc(p.ca || '—')} · ${esc(p.categoria || '')}${num(p.vidaUtilDias) ? ' · troca a cada ' + num(p.vidaUtilDias) + ' dias' : ''} · ${brl(p.custo)}</div>
+    ${saldosTxt(p) ? `<div class="t2">${saldosTxt(p)}</div>` : ''}</div>
+    <div class="side"><span class="badge ${low ? 'b-warn' : 'b-mut'}">Geral ${num(p.estoque)}${num(p.estoqueMin) ? ' / mín ' + num(p.estoqueMin) : ''}</span>${caBadge(p)}</div></button>`;
 }
 document.addEventListener('click', e => {
   if (e.target.closest('#sheet')) return;
@@ -862,6 +869,7 @@ document.addEventListener('click', e => { const b = e.target.closest('[data-deci
 
 /* ================= entrega de EPI ================= */
 function renderEpiTop() {
+  renderEstSel();
   const f = funcPicker('e', E, () => { E.itens = []; renderEpiTop(); renderEpiItens(); });
   const card = $('#e-kitcard');
   if (!f) { card.hidden = true; } else {
@@ -880,7 +888,7 @@ function renderEpiTop() {
   }
   const q = norm($('#e-q').value);
   $('#e-res').innerHTML = !q ? '' : (S.epis.filter(p => !E.itens.some(i => i.epiId === p.id) && norm([p.nome, p.ca, p.categoria].join(' ')).includes(q)).slice(0, 8).map(p =>
-    `<button class="res" data-adde="${esc(p.id)}"><span><b>${esc(p.nome)}</b> <span class="note">CA ${esc(p.ca || '—')} · estoque ${num(p.estoque)}</span></span>${caState(p) === 'vencido' ? '<span class="badge b-bad">CA vencido</span>' : epiBloqueio(p, f) ? '<span class="badge b-warn">Fora da lista · exige autorização +</span>' : exigeAut(p) ? '<span class="badge b-warn">Exige autorização +</span>' : '<span class="badge b-ok">Adicionar +</span>'}</button>`).join('') || `<div class="note">Nenhum EPI encontrado.</div>`);
+    `<button class="res" data-adde="${esc(p.id)}"><span><b>${esc(p.nome)}</b> <span class="note">CA ${esc(p.ca || '—')} · ${esc(estNome(E.est))}: ${saldo(p, E.est)}</span></span>${caState(p) === 'vencido' ? '<span class="badge b-bad">CA vencido</span>' : epiBloqueio(p, f) ? '<span class="badge b-warn">Fora da lista · exige autorização +</span>' : exigeAut(p) ? '<span class="badge b-warn">Exige autorização +</span>' : '<span class="badge b-ok">Adicionar +</span>'}</button>`).join('') || `<div class="note">Nenhum EPI encontrado.</div>`);
   $('#e-termo').textContent = `Declaro que recebi ${f ? '(' + (f.nome || '') + ') ' : ''}gratuitamente os EPIs listados acima, em perfeito estado, e que fui orientado sobre seu uso correto, guarda, conservação e higienização, conforme a NR-6. Comprometo-me a usá-los apenas para a finalidade a que se destinam e a comunicar qualquer alteração que os torne impróprios para uso.`;
   $('#e-submit').disabled = S.canWrite === false;
 }
@@ -888,7 +896,7 @@ function renderEpiItens() {
   const f = S.func.find(x => x.id === E.func); const U = f ? (ultimas()[f.id] || {}) : {};
   $('#e-itens').innerHTML = E.itens.length ? E.itens.map((it, i) => {
     const p = S.epis.find(x => x.id === it.epiId); if (!p) return '';
-    return `<div class="erow"><div class="ehead"><div class="main"><b>${esc(p.nome)}</b> ${caBadge(p)}<div class="t2">CA ${esc(p.ca || '—')} · ${brl(p.custo)} · estoque ${num(p.estoque)}${U[p.id] ? ' · última entrega ' + fmtD(U[p.id].data) : ''}</div></div><button class="x" data-rme="${i}" aria-label="Remover">×</button></div>
+    return `<div class="erow"><div class="ehead"><div class="main"><b>${esc(p.nome)}</b> ${caBadge(p)}<div class="t2">CA ${esc(p.ca || '—')} · ${brl(p.custo)} · ${esc(estNome(E.est))}: <b>${saldo(p, E.est)}</b>${U[p.id] ? ' · última entrega ' + fmtD(U[p.id].data) : ''}</div></div><button class="x" data-rme="${i}" aria-label="Remover">×</button></div>
       <div class="ef"><input type="number" min="1" value="${num(it.qtd) || 1}" data-ei="${i}" data-k="qtd" aria-label="Quantidade"><input value="${esc(it.tam)}" placeholder="Tam." data-ei="${i}" data-k="tam" aria-label="Tamanho">
       <select data-ei="${i}" data-k="motivo" aria-label="Motivo"><option value="">Motivo da entrega…</option>${Object.entries(MOT).map(([k, v]) => `<option value="${k}" ${it.motivo === k ? 'selected' : ''}>${v}</option>`).join('')}</select></div><div class="autst" id="aut-${i}">${autHtml(it, i)}</div></div>`;
   }).join('') : `<div class="note" style="margin-top:8px">Nenhum EPI adicionado.</div>`;
@@ -934,6 +942,7 @@ $('#e-submit').onclick = async () => {
     if (!it.motivo) return toast(`Informe o motivo da entrega de ${p.nome}.`, 'bad');
     if (caState(p) === 'vencido') return toast(`CA de ${p.nome} vencido.`, 'bad');
     if (!(num(it.qtd) >= 1)) return toast('Quantidade inválida.', 'bad');
+    if (E.est && saldo(p, E.est) < num(it.qtd)) return toast(`${estNome(E.est)} tem só ${saldo(p, E.est)} de ${p.nome}. Transfira do estoque geral antes.`, 'bad');
     const fora = foraDaLista(p, f);
     if (exigeAut(p) || fora) {
       if (S.canEdit && podeDecidir()) auts[p.id] = { autorizacaoId: '', autorizadoPor: S.uid || 'gerencia', autorizacaoTipo: 'direta', excecaoFuncao: fora };
@@ -948,8 +957,8 @@ $('#e-submit').onclick = async () => {
       const p = S.epis.find(x => x.id === it.epiId);
       await db.collection('entregas').doc().set({ numero, data: now, funcionarioId: f.id, funcionarioNome: str(f.nome), matricula: str(f.matricula), funcao: str(f.funcao), area: str(f.area),
         epiId: p.id, epiNome: str(p.nome), ca: str(p.ca), validadeCA: str(p.validadeCA), categoria: str(p.categoria), qtd: num(it.qtd), tamanho: str(it.tam).trim(), motivo: it.motivo,
-        custo: num(p.custo), proximaTroca: num(p.vidaUtilDias) ? addDays(num(p.vidaUtilDias)) : '', assinatura: sig, responsavel: S.uid || '', ...(auts[p.id] || {}) });
-      try { await db.doc('epis/' + p.id).update({ estoque: Math.max(0, num(p.estoque) - num(it.qtd)) }); } catch (e) { console.warn(e); }
+        custo: num(p.custo), proximaTroca: num(p.vidaUtilDias) ? addDays(num(p.vidaUtilDias)) : '', assinatura: sig, responsavel: S.uid || '', estoqueId: E.est || '', estoqueNome: estNome(E.est), ...(auts[p.id] || {}) });
+      try { await db.doc('epis/' + p.id).update(E.est ? { saldos: Object.assign({}, p.saldos || {}, { [E.est]: Math.max(0, saldo(p, E.est) - num(it.qtd)) }) } : { estoque: Math.max(0, num(p.estoque) - num(it.qtd)) }); } catch (e) { console.warn(e); }
     }
     toast(`Entrega registrada (${E.itens.length} item(ns)).`, 'ok');
     E.func = null; E.itens = []; $('#e-func-q').value = ''; padE.clear(); renderEpiTop(); renderEpiItens();
@@ -958,7 +967,7 @@ $('#e-submit').onclick = async () => {
 };
 
 /* ================= cadastros ================= */
-function renderCad() { renderFerr(); renderEpis(); renderFunc(); renderKits(); renderEmp(); renderTrein(); if (sub === 'regras') renderRegras(); if (sub === 'usuarios') renderUsuarios(); }
+function renderCad() { renderFerr(); renderEpis(); renderFunc(); renderKits(); renderEmp(); renderTrein(); renderEstoques(); if (sub === 'regras') renderRegras(); if (sub === 'usuarios') renderUsuarios(); }
 function logoImg() { const e = S.emp || {}; return /^data:image\/(png|jpeg);base64,/.test(str(e.logo)) ? e : null; }
 function aplicarLogo() {
   const el = document.querySelector('header .logo'); if (!el) return;
@@ -1019,11 +1028,13 @@ function renderFerr() {
   $('#f-chips').innerHTML = FCH.map(([k, t]) => `<button class="chip ${fFilter === k ? 'on' : ''}" data-fch="${k}">${t}</button>`).join('');
   if (!S.ready.ferr) { $('#f-list').innerHTML = loading(); return; }
   const q = norm($('#f-q').value);
-  const L = S.ferr.filter(f => (fFilter === 'todas' ? f.status !== 'baixada' : fFilter === 'calib' ? ['vencida', 'vence', 'sem'].includes(calib(f)) : f.status === fFilter) && (!q || matchFerr(f, q)))
+  const fe = $('#f-est'); if (fe) { const v = fe.value; fe.innerHTML = `<option value="*">Todos os estoques</option><option value="">Estoque geral</option>` + S.est.map(e => `<option value="${esc(e.id)}">${esc(e.nome)}</option>`).join(''); fe.value = [...fe.options].some(o => o.value === v) ? v : '*'; fe.hidden = !S.est.length; }
+  const fev = fe && !fe.hidden ? fe.value : '*';
+  const L = S.ferr.filter(f => (fev === '*' || str(f.estoqueId) === fev) && (fFilter === 'todas' ? f.status !== 'baixada' : fFilter === 'calib' ? ['vencida', 'vence', 'sem'].includes(calib(f)) : f.status === fFilter) && (!q || matchFerr(f, q)))
     .sort((a, b) => str(a.codigo).localeCompare(str(b.codigo), 'pt', { numeric: true }));
   $('#f-list').innerHTML = L.length ? L.slice(0, 300).map(ferrRow).join('') + (L.length > 300 ? `<div class="note">Mostrando 300 de ${L.length}.</div>` : '') : `<div class="empty">${S.ferr.length ? 'Nada encontrado.' : 'Nenhuma ferramenta cadastrada.'}</div>`;
 }
-$('#f-q').addEventListener('input', renderFerr);
+$('#f-q').addEventListener('input', renderFerr); $('#f-est').addEventListener('change', renderFerr);
 $('#f-chips').addEventListener('click', e => { const b = e.target.closest('[data-fch]'); if (b) { fFilter = b.dataset.fch; renderFerr(); } });
 $('#f-new').onclick = () => openFerr(null);
 function histFor(field, val) { return S.caut.filter(c => field === 'ferramentaIds' ? (c.ferramentaIds || []).includes(val) : c[field] === val).sort((a, b) => str(b.retiradaEm).localeCompare(str(a.retiradaEm))).slice(0, 60); }
@@ -1080,6 +1091,113 @@ async function saveFerr(f) {
 }
 
 /* EPIs */
+/* ================= estoques avançados ================= */
+const estNome = id => id ? str((S.est.find(e => e.id === id) || {}).nome) || 'Estoque removido' : 'Estoque geral';
+const saldo = (p, id) => id ? num((p.saldos || {})[id]) : num(p.estoque);
+const totalEpi = p => num(p.estoque) + Object.values(p.saldos || {}).reduce((a, v) => a + num(v), 0);
+function saldosTxt(p) { const L = S.est.map(e => [e, num((p.saldos || {})[e.id])]).filter(x => x[1] > 0); return L.length ? '📍 ' + L.map(([e, q]) => esc(e.nome) + ': ' + q).join(' · ') : ''; }
+function meuEstoque() { try { const U = window.__FB && window.__FB.users(); const m = U && U[window.__FB.uid]; return m && m.estoqueId && S.est.some(e => e.id === m.estoqueId) ? m.estoqueId : null; } catch (_) { return null; } }
+function renderEstSel() {
+  const card = $('#e-estcard'), sel = $('#e-est'); if (!card) return;
+  card.hidden = !S.est.length; if (!S.est.length) { E.est = ''; return; }
+  if (E.est == null) { let v = null; try { v = localStorage.getItem('estEntrega'); } catch (_) {} const m = meuEstoque(); E.est = m != null ? m : (v != null && (v === '' || S.est.some(e => e.id === v)) ? v : ''); }
+  sel.innerHTML = `<option value="">Estoque geral</option>` + S.est.slice().sort((a, b) => str(a.nome).localeCompare(str(b.nome), 'pt')).map(e => `<option value="${esc(e.id)}">${esc(e.nome)}</option>`).join('');
+  sel.value = E.est;
+}
+$('#e-est').addEventListener('change', e => { E.est = e.target.value; try { localStorage.setItem('estEntrega', E.est); } catch (_) {} renderEpiTop(); renderEpiItens(); });
+function resumoEstoque(id) {
+  const epis = S.epis.map(p => [p, saldo(p, id)]).filter(x => x[1] > 0);
+  const ferr = S.ferr.filter(f => str(f.estoqueId) === str(id || '') && f.status !== 'baixada');
+  return { epis, ferr, unid: epis.reduce((a, x) => a + x[1], 0), valor: epis.reduce((a, [p, q]) => a + q * num(p.custo), 0) + ferr.reduce((a, f) => a + num(f.valor), 0) };
+}
+function renderEstoques() {
+  const el = $('#es-list'); if (!el) return;
+  const pode = ['admin', 'gerente', 'almox'].includes(papelAtual());
+  ['es-new', 'es-tr'].forEach(id => { const b = $('#' + id); if (b) b.hidden = !pode; });
+  const card = (id, nome, sub) => { const r = resumoEstoque(id); const mes = S.ent.filter(e => str(e.estoqueId) === str(id || '') && str(e.data).slice(0, 7) === todayStr().slice(0, 7));
+    return `<button class="item" data-estq="${esc(id || '')}"><div class="main"><div class="t1">${esc(nome)}</div><div class="t2">${sub ? esc(sub) + ' · ' : ''}${r.epis.length} tipos de EPI · ${r.unid} unidades · ${r.ferr.length} ferramentas</div><div class="t2">${mes.length} entrega(s) de EPI neste mês</div></div><div class="side"><span class="badge b-mut">${brl(r.valor)}</span></div></button>`; };
+  el.innerHTML = card('', 'Estoque geral', 'recebe as notas fiscais') + S.est.slice().sort((a, b) => str(a.nome).localeCompare(str(b.nome), 'pt')).map(e => card(e.id, e.nome, e.responsavel ? 'resp. ' + e.responsavel : '')).join('')
+    + (S.est.length ? '' : '<div class="empty">Nenhum estoque avançado ainda. Toque em “+ Novo estoque”.</div>');
+}
+document.addEventListener('click', e => { const b = e.target.closest('[data-estq]'); if (b && !e.target.closest('#sheet')) openEstoque(b.dataset.estq); });
+$('#es-new').onclick = () => editEstoque(null);
+$('#es-tr').onclick = () => openTransf('', '');
+function editEstoque(id) {
+  const e = id ? S.est.find(x => x.id === id) : null;
+  openModal(mtop(e ? 'Editar estoque' : 'Novo estoque avançado') + `<div class="card"><label for="es-n">Nome do estoque *</label><input id="es-n" value="${esc(e ? e.nome : '')}" placeholder="Ex.: Laminador Resende">
+    <label for="es-r">Responsável</label><input id="es-r" value="${esc(e ? e.responsavel : '')}" placeholder="Ex.: técnico ou encarregado da área">
+    <label for="es-l">Local / observação</label><input id="es-l" value="${esc(e ? e.local : '')}" placeholder="Ex.: Contêiner 2 · Aciaria"></div>
+    <div class="actions">${e ? '<button class="btn danger" id="es-del">Excluir</button>' : ''}<button class="btn ghost" data-close>Cancelar</button><button class="btn primary" id="es-s">Salvar</button></div>`);
+  $('#es-s').onclick = async () => { if (!guardWrite()) return; const nome = $('#es-n').value.trim(); if (!nome) return toast('Dê um nome ao estoque.', 'bad');
+    if (S.est.some(x => x.id !== id && norm(x.nome) === norm(nome))) return toast('Já existe um estoque com esse nome.', 'bad');
+    const d = { nome, responsavel: $('#es-r').value.trim(), local: $('#es-l').value.trim() };
+    try { if (e) await db.doc('estoques/' + e.id).update(d); else await db.collection('estoques').doc().set(Object.assign({ criadoEm: new Date().toISOString() }, d)); closeModal(); toast('Estoque salvo.', 'ok'); } catch (er) { handleErr(er); } };
+  const del = $('#es-del'); if (del) { const r = resumoEstoque(id); if (r.unid || r.ferr.length) { del.onclick = () => toast('Esvazie o estoque antes de excluir (transfira os itens).', 'bad'); } else armDelete(del, () => db.doc('estoques/' + id).delete()); }
+}
+function openEstoque(id) {
+  const nome = estNome(id); const r = resumoEstoque(id); const e = id ? S.est.find(x => x.id === id) : null;
+  const ents = S.ent.filter(x => str(x.estoqueId) === str(id || '')).sort((a, b) => str(b.data).localeCompare(str(a.data))).slice(0, 15);
+  const trs = (S.transf || []).filter(t => t.de === (id || '') || t.para === (id || '')).sort((a, b) => str(b.data).localeCompare(str(a.data))).slice(0, 10);
+  const pode = ['admin', 'gerente', 'almox'].includes(papelAtual());
+  openModal(mtop(esc(nome)) + `<div class="card"><div class="note">${e && e.responsavel ? 'Responsável: ' + esc(e.responsavel) + ' · ' : ''}${e && e.local ? esc(e.local) + ' · ' : ''}${r.unid} unidades de EPI · ${r.ferr.length} ferramentas · ${brl(r.valor)}</div>
+    ${pode ? `<div class="actions" style="margin-top:8px">${e ? '<button class="btn ghost sm" id="eq-ed">Editar</button>' : ''}${id ? '<button class="btn ghost sm" id="eq-dev">Devolver ao geral</button>' : ''}<button class="btn primary sm" id="eq-tr">${id ? 'Transferir para cá' : 'Transferir daqui'}</button></div>` : ''}</div>
+    <h3>EPIs (${r.epis.length})</h3><div class="card" style="padding:6px 10px"><div class="tbwrap" style="margin:0"><table class="tb"><thead><tr><th>EPI</th><th>CA</th><th class="n">Saldo</th><th class="n">Valor</th></tr></thead><tbody>
+    ${r.epis.length ? r.epis.sort((a, b) => str(a[0].nome).localeCompare(str(b[0].nome), 'pt')).map(([p, q]) => `<tr><td>${esc(p.nome)}</td><td>${esc(p.ca)}</td><td class="n"><b>${q}</b></td><td class="n">${brl(q * num(p.custo))}</td></tr>`).join('') : '<tr><td colspan="4" class="note">Sem EPI neste estoque.</td></tr>'}</tbody></table></div></div>
+    <h3>Ferramentas (${r.ferr.length})</h3><div class="list">${r.ferr.length ? r.ferr.sort((a, b) => str(a.codigo).localeCompare(str(b.codigo), 'pt', { numeric: true })).map(f => `<div class="item" style="cursor:default"><div class="main"><div class="t1"><span class="code">${esc(f.codigo)}</span> ${esc(f.descricao)}</div>${f.status === 'emprestada' && f.comQuem ? `<div class="t2">Com: ${esc(f.comQuem)}</div>` : ''}</div><div class="side">${badge(f.status)}</div></div>`).join('') : '<div class="empty">Sem ferramentas neste estoque.</div>'}</div>
+    <h3>Últimas entregas de EPI daqui</h3><div class="card" style="padding:6px 10px"><div class="tbwrap" style="margin:0"><table class="tb"><thead><tr><th>Data</th><th>Funcionário</th><th>EPI</th><th class="n">Qtd</th></tr></thead><tbody>
+    ${ents.length ? ents.map(x => `<tr><td>${fmtD(x.data)}</td><td>${esc(x.funcionarioNome)}</td><td>${esc(x.epiNome)}</td><td class="n">${num(x.qtd)}</td></tr>`).join('') : '<tr><td colspan="4" class="note">Nenhuma entrega registrada a partir deste estoque.</td></tr>'}</tbody></table></div></div>
+    <h3>Transferências</h3><div class="list">${trs.length ? trs.map(t => `<div class="item" style="cursor:default"><div class="main"><div class="t1">${esc(estNome(t.de))} → ${esc(estNome(t.para))}</div><div class="t2">${fmtDT(t.data)} · ${(t.itens || []).map(i => i.tipo === 'epi' ? esc(i.nome) + ' ×' + num(i.qtd) : esc(i.codigo)).join(', ')}</div>${t.obs ? `<div class="t2">${esc(t.obs)}</div>` : ''}</div></div>`).join('') : '<div class="empty">Nenhuma transferência.</div>'}</div>`);
+  const ed = $('#eq-ed'); if (ed) ed.onclick = () => editEstoque(id);
+  const tr = $('#eq-tr'); if (tr) tr.onclick = () => id ? openTransf('', id) : openTransf('', '');
+  const dv = $('#eq-dev'); if (dv) dv.onclick = () => openTransf(id, '');
+}
+let TR = null;
+function openTransf(de, para) {
+  if (!S.est.length) return toast('Crie um estoque avançado primeiro.', 'bad');
+  TR = { de: de || '', para: para != null ? para : '', epis: [], ferr: [] };
+  if (TR.de === TR.para) TR.para = (S.est.find(e => e.id !== TR.de) || {}).id || '';
+  const opts = v => `<option value="">Estoque geral</option>` + S.est.slice().sort((a, b) => str(a.nome).localeCompare(str(b.nome), 'pt')).map(e => `<option value="${esc(e.id)}" ${v === e.id ? 'selected' : ''}>${esc(e.nome)}</option>`).join('');
+  openModal(mtop('Transferir entre estoques') + `<div class="card"><div class="grid2"><div><label for="tr-de">De</label><select id="tr-de">${opts(TR.de)}</select></div><div><label for="tr-pa">Para</label><select id="tr-pa">${opts(TR.para)}</select></div></div></div>
+    <div class="card"><span class="lbl">Itens</span><input id="tr-q" placeholder="Buscar EPI (nome ou CA) ou ferramenta (código)" autocomplete="off"><div id="tr-res" class="results"></div><div id="tr-itens" style="margin-top:8px"></div>
+    <label for="tr-obs">Observação</label><input id="tr-obs" placeholder="Ex.: reposição mensal do laminador"></div>
+    <div class="actions"><button class="btn ghost" data-close>Cancelar</button><button class="btn primary" id="tr-go">Confirmar transferência</button></div>`);
+  $('#tr-de').value = TR.de; $('#tr-pa').value = TR.para;
+  const draw = () => {
+    $('#tr-itens').innerHTML = (TR.epis.map((x, i) => { const p = S.epis.find(e => e.id === x.id); const disp = saldo(p, TR.de); return `<div class="sel"><div class="main"><b>${esc(p.nome)}</b> <span class="note">CA ${esc(p.ca)} · disponível em ${esc(estNome(TR.de))}: ${disp}</span></div><input type="number" min="1" max="${disp}" value="${x.qtd}" data-trq="${i}" style="width:80px"><button class="x" data-trx="e${i}">×</button></div>`; }).join('')
+      + TR.ferr.map((id, i) => { const f = S.ferr.find(x => x.id === id); return `<div class="sel"><div class="main"><span class="code">${esc(f.codigo)}</span> ${esc(f.descricao)}</div><button class="x" data-trx="f${i}">×</button></div>`; }).join('')) || '<div class="note">Nenhum item.</div>';
+  };
+  const res = () => { const q = norm($('#tr-q').value); if (!q) { $('#tr-res').innerHTML = ''; return; }
+    const ep = S.epis.filter(p => !TR.epis.some(x => x.id === p.id) && saldo(p, TR.de) > 0 && norm(p.nome + ' ' + p.ca).includes(q)).slice(0, 6);
+    const fr = S.ferr.filter(f => !TR.ferr.includes(f.id) && str(f.estoqueId) === TR.de && f.status === 'disponivel' && matchFerr(f, q)).slice(0, 6);
+    $('#tr-res').innerHTML = ep.map(p => `<button class="res" data-tra="e:${esc(p.id)}"><span><b>${esc(p.nome)}</b> <span class="note">CA ${esc(p.ca)} · tem ${saldo(p, TR.de)}</span></span><span class="badge b-ok">EPI +</span></button>`).join('')
+      + fr.map(f => `<button class="res" data-tra="f:${esc(f.id)}"><span><span class="code">${esc(f.codigo)}</span> ${esc(f.descricao)}</span><span class="badge b-info">Ferramenta +</span></button>`).join('') || '<div class="note">Nada disponível neste estoque com esse nome.</div>'; };
+  $('#tr-q').addEventListener('input', res);
+  ['#tr-de', '#tr-pa'].forEach(s0 => $(s0).addEventListener('change', () => { TR.de = $('#tr-de').value; TR.para = $('#tr-pa').value; TR.epis = []; TR.ferr = []; draw(); res(); }));
+  const card = $('#tr-itens').parentElement;
+  card.addEventListener('click', ev => { const a = ev.target.closest('[data-tra]'); if (a) { const [t, id] = a.dataset.tra.split(':'); if (t === 'e') TR.epis.push({ id, qtd: 1 }); else TR.ferr.push(id); $('#tr-q').value = ''; res(); draw(); return; }
+    const x = ev.target.closest('[data-trx]'); if (x) { const k = x.dataset.trx; if (k[0] === 'e') TR.epis.splice(+k.slice(1), 1); else TR.ferr.splice(+k.slice(1), 1); draw(); } });
+  card.addEventListener('input', ev => { const t = ev.target.closest('[data-trq]'); if (t) TR.epis[+t.dataset.trq].qtd = Math.max(0, Math.round(num(t.value))); });
+  draw();
+  $('#tr-go').onclick = async () => {
+    if (!guardWrite()) return;
+    if (TR.de === TR.para) return toast('Origem e destino são iguais.', 'bad');
+    if (!TR.epis.length && !TR.ferr.length) return toast('Adicione itens.', 'bad');
+    for (const x of TR.epis) { const p = S.epis.find(e => e.id === x.id); if (!(x.qtd >= 1)) return toast('Quantidade inválida em ' + p.nome, 'bad'); if (x.qtd > saldo(p, TR.de)) return toast(`${estNome(TR.de)} tem só ${saldo(p, TR.de)} de ${p.nome}.`, 'bad'); }
+    const btn = $('#tr-go'); btn.disabled = true; btn.textContent = 'Transferindo…';
+    try {
+      const itens = [];
+      for (const x of TR.epis) {
+        const p = S.epis.find(e => e.id === x.id); const sal = Object.assign({}, p.saldos || {}); const d = {};
+        if (TR.de) sal[TR.de] = saldo(p, TR.de) - x.qtd; else d.estoque = num(p.estoque) - x.qtd;
+        if (TR.para) sal[TR.para] = num(sal[TR.para]) + x.qtd; else d.estoque = (d.estoque != null ? d.estoque : num(p.estoque)) + x.qtd;
+        d.saldos = sal; await db.doc('epis/' + p.id).update(d); itens.push({ tipo: 'epi', id: p.id, nome: str(p.nome), ca: str(p.ca), qtd: x.qtd }); await sleep(30);
+      }
+      for (const id of TR.ferr) { const f = S.ferr.find(x => x.id === id); await db.doc('ferramentas/' + id).update({ estoqueId: TR.para }); itens.push({ tipo: 'ferr', id, codigo: str(f.codigo), nome: str(f.descricao) }); await sleep(30); }
+      await db.collection('transferencias').doc().set({ data: new Date().toISOString(), de: TR.de, para: TR.para, deNome: estNome(TR.de), paraNome: estNome(TR.para), itens, obs: $('#tr-obs').value.trim(), por: S.uid || '' });
+      closeModal(); toast(`Transferido para ${estNome(TR.para)}: ${itens.length} item(ns).`, 'ok');
+    } catch (er) { handleErr(er); btn.disabled = false; btn.textContent = 'Confirmar transferência'; }
+  };
+}
 /* ================= base oficial de CAs (MTE / CAEPI), atualizada todo dia pelo GitHub ================= */
 const CAEPI = { base: null, carregando: null, nomes: {} };
 function caLoad() {
@@ -2298,12 +2416,12 @@ const PAPEIS = {
   tst: ['TST', 'Entrega de EPI, kits e OS, treinamentos, fichas, relatórios; consulta regras', 'Colaborador'],
   rh: ['RH', 'Funcionários, admissão (ficha + OS), treinamentos e relatórios', 'Colaborador']
 };
-const SUBS = ['ferramentas', 'epis', 'funcionarios', 'kits', 'regras', 'trein', 'usuarios', 'empresa'];
+const SUBS = ['ferramentas', 'epis', 'funcionarios', 'kits', 'regras', 'trein', 'usuarios', 'estoques', 'empresa'];
 const ACESSO = {
   admin: { views: '*', subs: '*' },
-  gerente: { views: '*', subs: ['ferramentas', 'epis', 'funcionarios', 'kits', 'regras', 'trein'] },
-  almox: { views: ['painel', 'retirada', 'devolucao', 'epi', 'cadastros'], subs: ['ferramentas', 'epis', 'funcionarios'] },
-  tst: { views: ['painel', 'epi', 'relatorios', 'cadastros'], subs: ['epis', 'funcionarios', 'kits', 'regras', 'trein'] },
+  gerente: { views: '*', subs: ['ferramentas', 'epis', 'funcionarios', 'kits', 'regras', 'trein', 'estoques'] },
+  almox: { views: ['painel', 'retirada', 'devolucao', 'epi', 'cadastros'], subs: ['ferramentas', 'epis', 'funcionarios', 'estoques'] },
+  tst: { views: ['painel', 'epi', 'relatorios', 'cadastros'], subs: ['epis', 'funcionarios', 'kits', 'regras', 'trein', 'estoques'] },
   rh: { views: ['painel', 'relatorios', 'cadastros'], subs: ['funcionarios', 'trein'] },
   none: { views: ['painel'], subs: [] }
 };
@@ -2376,7 +2494,7 @@ function renderUsuariosFB() {
     <div class="grid3"><div><label for="us-n">Nome completo</label><input id="us-n"></div><div><label for="us-e">E-mail</label><input id="us-e" type="email" autocomplete="off"></div><div><label for="us-p">Perfil</label><select id="us-p">${opt('almox')}</select></div></div>
     <div class="actions"><button class="btn primary" id="us-add">Cadastrar e enviar convite</button></div></div>
     <div class="card"><p class="ct">Usuários (${ids.length})</p>${ids.map(id => { const u = U[id]; const eu = id === me; return `<div class="kitrow" style="flex-wrap:wrap"><div class="main"><b>${esc(u.nome)}</b>${eu ? ' <span class="badge b-info">você</span>' : ''}${u.ativo === false ? ' <span class="badge b-mut">desativado</span>' : ''}<div class="t2">${esc(u.email)}</div></div>
-      <select data-usp="${esc(id)}" style="width:auto;padding:7px" ${eu ? 'disabled' : ''}>${opt(u.papel)}</select><button class="btn sm ghost" data-usinv="${esc(u.email)}">Reenviar convite</button>${eu ? '' : `<button class="btn sm ${u.ativo === false ? 'ghost' : 'danger'}" data-usat="${esc(id)}">${u.ativo === false ? 'Reativar' : 'Desativar'}</button>`}</div>`; }).join('')}</div>
+      <select data-usp="${esc(id)}" style="width:auto;padding:7px" ${eu ? 'disabled' : ''}>${opt(u.papel)}</select>${S.est.length ? `<select data-use="${esc(id)}" style="width:auto;padding:7px" title="Estoque padrão nas entregas"><option value="">Estoque: geral</option>${S.est.map(e => `<option value="${esc(e.id)}" ${u.estoqueId === e.id ? 'selected' : ''}>Estoque: ${esc(e.nome)}</option>`).join('')}</select>` : ''}<button class="btn sm ghost" data-usinv="${esc(u.email)}">Reenviar convite</button>${eu ? '' : `<button class="btn sm ${u.ativo === false ? 'ghost' : 'danger'}" data-usat="${esc(id)}">${u.ativo === false ? 'Reativar' : 'Desativar'}</button>`}</div>`; }).join('')}</div>
     <div class="card"><p class="ct">O que cada perfil faz</p><div class="tbwrap"><table class="tb"><thead><tr><th>Perfil</th><th>Acesso</th></tr></thead><tbody>${Object.values(PAPEIS).map(p => `<tr><td><b>${p[0]}</b></td><td>${p[1]}</td></tr>`).join('')}</tbody></table></div>
     <p class="note">Desativar bloqueia o acesso na hora (use no desligamento). O histórico registrado pela pessoa continua.</p></div>`;
   $('#us-add').onclick = async () => {
@@ -2390,6 +2508,7 @@ function renderUsuariosFB() {
     finally { b.disabled = false; b.textContent = 'Cadastrar e enviar convite'; }
   };
   $$('#us-body [data-usp]').forEach(sl => sl.onchange = async () => { try { await window.__FB.atualizarUsuario(sl.dataset.usp, { papel: sl.value }); toast('Perfil alterado.', 'ok'); } catch (e) { toast('Não foi possível alterar.', 'bad'); } });
+  $$('#us-body [data-use]').forEach(sl => sl.onchange = async () => { try { await window.__FB.atualizarUsuario(sl.dataset.use, { estoqueId: sl.value }); toast('Estoque padrão definido.', 'ok'); } catch (e) { toast('Não foi possível alterar.', 'bad'); } });
   $$('#us-body [data-usinv]').forEach(b => b.onclick = async () => { try { await window.__FB.reenviarConvite(b.dataset.usinv); toast('Convite reenviado.', 'ok'); } catch (e) { toast('Não foi possível reenviar.', 'bad'); } });
   $$('#us-body [data-usat]').forEach(b => { let armed = false; b.onclick = async () => { const u = U[b.dataset.usat]; if (u.ativo !== false && !armed) { armed = true; b.textContent = 'Confirmar'; return; } try { await window.__FB.atualizarUsuario(b.dataset.usat, { ativo: u.ativo === false }); toast(u.ativo === false ? 'Reativado.' : 'Desativado.', 'ok'); } catch (e) { toast('Não foi possível alterar.', 'bad'); } }; });
 }
@@ -2449,6 +2568,8 @@ show(); renderEpiItens();
   db.collection('decisoes').onSnapshot(s => { S.dec = s.docs.map(asObj); sched(); }, e => console.warn(e));
   if (!window.__FBMODE) db.doc('config/usuarios').onSnapshot(d => { S.usuarios = (d.exists && (d.data() || {}).users) || {}; S.usrReady = true; sched(); pedirAcesso(); }, e => console.warn(e));
   if (!window.__FBMODE) db.collection('pedidos_acesso').onSnapshot(s => { S.ped = s.docs.map(asObj); sched(); }, e => console.warn(e));
+  db.collection('estoques').onSnapshot(s => { S.est = s.docs.map(asObj); sched(); }, e => console.warn(e));
+  db.collection('transferencias').onSnapshot(s => { S.transf = s.docs.map(asObj); sched(); }, e => console.warn(e));
   db.collection('trein_tipos').onSnapshot(s => { S.tt = s.docs.map(asObj); sched(); }, e => console.warn(e));
   db.collection('treinamentos').onSnapshot(s => { S.tr = s.docs.map(asObj); sched(); }, e => console.warn(e));
   [['ferr', 'ferramentas'], ['func', 'funcionarios'], ['epis', 'epis'], ['kits', 'kits'], ['caut', 'cautelas'], ['ent', 'entregas']].forEach(([k, c]) => {
