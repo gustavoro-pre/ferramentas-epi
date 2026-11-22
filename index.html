@@ -2059,8 +2059,8 @@ show(); renderEpiItens();
   db.doc('config/regras').onSnapshot(d => { const r = d.exists ? (d.data() || {}) : {}; S.regras = { epi: r.epi || {}, tipos: r.tipos || {} }; if (!RG.dirty) RG.d = null; sched(); }, e => console.warn(e));
   db.collection('autorizacoes').onSnapshot(s => { S.sol = s.docs.map(asObj); sched(); }, e => console.warn(e));
   db.collection('decisoes').onSnapshot(s => { S.dec = s.docs.map(asObj); sched(); }, e => console.warn(e));
-  db.doc('config/usuarios').onSnapshot(d => { S.usuarios = (d.exists && (d.data() || {}).users) || {}; S.usrReady = true; sched(); pedirAcesso(); }, e => console.warn(e));
-  db.collection('pedidos_acesso').onSnapshot(s => { S.ped = s.docs.map(asObj); sched(); }, e => console.warn(e));
+  if (!window.__FBMODE) db.doc('config/usuarios').onSnapshot(d => { S.usuarios = (d.exists && (d.data() || {}).users) || {}; S.usrReady = true; sched(); pedirAcesso(); }, e => console.warn(e));
+  if (!window.__FBMODE) db.collection('pedidos_acesso').onSnapshot(s => { S.ped = s.docs.map(asObj); sched(); }, e => console.warn(e));
   db.collection('trein_tipos').onSnapshot(s => { S.tt = s.docs.map(asObj); sched(); }, e => console.warn(e));
   db.collection('treinamentos').onSnapshot(s => { S.tr = s.docs.map(asObj); sched(); }, e => console.warn(e));
   [['ferr', 'ferramentas'], ['func', 'funcionarios'], ['epis', 'epis'], ['kits', 'kits'], ['caut', 'cautelas'], ['ent', 'entregas']].forEach(([k, c]) => {
